@@ -1,4 +1,4 @@
-name: Build native Android APK
+name: Build and publish Android APK
 
 on:
   workflow_dispatch:
