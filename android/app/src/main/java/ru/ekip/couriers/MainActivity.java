@@ -1483,34 +1483,40 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void playVoiceCue(boolean connected) {
-        playChime(connected ? new int[]{392, 494, 587, 784} : new int[]{784, 587, 440, 330}, 760);
+        playChime(connected ? new int[]{349, 392, 440, 523} : new int[]{523, 440, 392, 330}, connected ? 1150 : 1250);
     }
 
     private void playMicCue(boolean enabled) {
-        playChime(enabled ? new int[]{523, 659, 784} : new int[]{784, 587, 392}, 560);
+        playChime(enabled ? new int[]{440, 494, 587} : new int[]{587, 494, 370}, enabled ? 850 : 920);
     }
 
     private void playChime(int[] notes, int durationMs) {
         handler.removeCallbacks(releaseFeedbackAudioTrack);
         releaseFeedbackAudioTrack.run();
-        int sampleRate = 22050;
-        int noteMs = durationMs / notes.length;
-        int gapMs = 18;
-        int noteSamples = sampleRate * noteMs / 1000;
-        int gapSamples = sampleRate * gapMs / 1000;
-        short[] pcm = new short[noteSamples * notes.length + gapSamples * (notes.length - 1)];
-        int offset = 0;
-        for (int note : notes) {
-            for (int i = 0; i < noteSamples; i++) {
-                float seconds = i / (float) sampleRate;
-                float attack = Math.min(1f, seconds / .022f);
-                float release = Math.min(1f, (noteSamples - i) / (sampleRate * .035f));
-                float envelope = attack * release * (.72f + .28f * (float) Math.exp(-seconds * 3.2f));
-                double phase = 2.0 * Math.PI * note * seconds;
-                double tone = Math.sin(phase) + .23 * Math.sin(phase * 2.0) + .08 * Math.sin(phase * 3.0);
-                pcm[offset++] = (short) (tone * envelope * 10500f);
+        int sampleRate = 24000;
+        int sampleCount = sampleRate * durationMs / 1000;
+        short[] pcm = new short[sampleCount];
+        double phase = 0;
+        float secondsTotal = durationMs / 1000f;
+        for (int i = 0; i < sampleCount; i++) {
+            float seconds = i / (float) sampleRate;
+            float notePosition = seconds / secondsTotal * notes.length;
+            int noteIndex = Math.min(notes.length - 1, (int) notePosition);
+            float withinNote = notePosition - noteIndex;
+            float glide = Math.max(0f, Math.min(1f, (withinNote - .68f) / .32f));
+            glide = glide * glide * (3f - 2f * glide);
+            float frequency = notes[noteIndex];
+            if (noteIndex + 1 < notes.length) {
+                frequency += (notes[noteIndex + 1] - frequency) * glide;
             }
-            for (int i = 0; i < gapSamples && offset < pcm.length; i++) pcm[offset++] = 0;
+            phase += 2.0 * Math.PI * frequency / sampleRate;
+            float attack = Math.max(0f, Math.min(1f, seconds / .16f));
+            attack = attack * attack * (3f - 2f * attack);
+            float release = Math.max(0f, Math.min(1f, (secondsTotal - seconds) / .3f));
+            release = release * release * (3f - 2f * release);
+            float envelope = attack * release;
+            double tone = Math.sin(phase) + .075 * Math.sin(phase * 2.0) + .018 * Math.sin(phase * 3.0);
+            pcm[i] = (short) (tone * envelope * 7600f);
         }
         AudioTrack track = null;
         try {
@@ -1535,7 +1541,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 if (count <= 0) throw new IllegalStateException("Audio cue could not be written");
                 written += count;
             }
-            track.setVolume(.72f);
+            track.setVolume(.48f);
             feedbackAudioTrack = track;
             track.play();
             handler.postDelayed(releaseFeedbackAudioTrack, durationMs + 100L);
