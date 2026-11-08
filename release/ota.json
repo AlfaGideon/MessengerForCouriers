@@ -1,5 +1,5 @@
 {
-  "webVersion": 6,
+  "webVersion": 7,
   "webUpdateUrl": "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/web-update.zip",
-  "webUpdateSha256": "97bb6674137159aa31680e1db92ee9eb087148f8c4a69526e51eaddccc1e13eb"
+  "webUpdateSha256": "b3c0348cea2b32684d1db0d27654add42d5f60bec9093974b066cb868f46e65d"
 }
