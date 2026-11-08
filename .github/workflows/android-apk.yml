@@ -17,7 +17,7 @@ on:
       - '.github/workflows/android-apk.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-debug-apk:
@@ -50,3 +50,13 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Place APK on the Arena branch
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/ekip-debug.apk
+          sha256sum release/ekip-debug.apk > release/ekip-debug.apk.sha256
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f release/ekip-debug.apk release/ekip-debug.apk.sha256
+          git commit -m "Publish built Ekip debug APK"
+          git push origin HEAD:${GITHUB_REF_NAME}
