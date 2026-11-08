@@ -2,16 +2,22 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowUpRight, Bell, Bookmark, Check, ChevronDown, ChevronRight,
-  CircleHelp, Compass, FileVideo, HardDrive, Headphones, Heart, Home, ImagePlus, MapPin, MessageCircle,
+  CircleHelp, CloudDownload, Compass, FileVideo, HardDrive, Headphones, Heart, Home, ImagePlus, MapPin, MessageCircle,
   Mic, MicOff, MoreHorizontal, Plus, Search, Send, Settings, Share2, ShieldCheck,
-  SlidersHorizontal, Sparkles, ThumbsUp, Trash2, Users, Video, Volume2, X, Zap
+  RefreshCw, Radio, SlidersHorizontal, Sparkles, ThumbsUp, Trash2, Users, Video, Volume2, X, Zap
 } from 'lucide-react';
 import './style.css';
 import { deleteSavedVideo, listSavedVideos, saveVideo } from './storage.js';
+import { fetchOtaManifest } from './ota.js';
 
-const people = [];
-const initialChats = [];
-const rooms = [];
+const rooms = [
+  { id: 'common', title: 'Общая комната', city: 'Для всех городов', detail: 'Общий голосовой зал экипа', tone: 'room-yellow', global: true },
+  { id: 'spb', title: 'Санкт-Петербург', city: 'Санкт-Петербург', detail: 'Голосовая для курьеров города', tone: 'room-blue' },
+  { id: 'moscow', title: 'Москва', city: 'Москва', detail: 'Голосовая для курьеров города', tone: 'room-pink' },
+  { id: 'kazan', title: 'Казань', city: 'Казань', detail: 'Голосовая для курьеров города', tone: 'room-green' },
+  { id: 'ekb', title: 'Екатеринбург', city: 'Екатеринбург', detail: 'Голосовая для курьеров города', tone: 'room-yellow' },
+  { id: 'novosibirsk', title: 'Новосибирск', city: 'Новосибирск', detail: 'Голосовая для курьеров города', tone: 'room-blue' },
+];
 
 function Avatar({ name, tone = 'blue', size = '' }) {
   return <span className={`avatar avatar-${tone} ${size}`}>{name}</span>;
@@ -36,6 +42,8 @@ function App() {
   const [settings, setSettings] = useState({ notifications: true, darkMode: false, location: true });
   const [videos, setVideos] = useState([]);
   const [videosLoading, setVideosLoading] = useState(true);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [otaStatus, setOtaStatus] = useState('idle');
 
   useEffect(() => {
     let active = true;
@@ -68,6 +76,51 @@ function App() {
     window.clearTimeout(window.__toastTimer);
     window.__toastTimer = window.setTimeout(() => setToast(''), 2600);
   };
+  const checkForUpdates = async (autoApply = false) => {
+    if (!window.EkipNative?.getWebVersion) {
+      setOtaStatus('native-only');
+      return;
+    }
+    setOtaStatus('checking');
+    try {
+      const manifest = await fetchOtaManifest();
+      const current = Number(window.EkipNative.getWebVersion());
+      if (Number(manifest.webVersion) > current) {
+        setUpdateInfo(manifest);
+        setOtaStatus('available');
+        if (autoApply) {
+          setOtaStatus('downloading');
+          window.EkipNative.installWebUpdate(manifest.webUpdateUrl, manifest.webUpdateSha256, String(manifest.webVersion));
+        }
+      } else {
+        setUpdateInfo(manifest);
+        setOtaStatus('current');
+      }
+    } catch (error) {
+      setOtaStatus('error');
+    }
+  };
+  const applyWebUpdate = () => {
+    if (!updateInfo || !window.EkipNative?.installWebUpdate) return;
+    setOtaStatus('downloading');
+    window.EkipNative.installWebUpdate(updateInfo.webUpdateUrl, updateInfo.webUpdateSha256, String(updateInfo.webVersion));
+  };
+
+  useEffect(() => {
+    window.__ekipOtaResult = (success) => {
+      if (success) {
+        setOtaStatus('current');
+        setUpdateInfo(null);
+        notify('Экип обновлён по воздуху');
+      } else {
+        setOtaStatus('error');
+        notify('Не удалось установить обновление. Проверьте интернет и попробуйте ещё раз.');
+      }
+    };
+    if (window.EkipNative?.getWebVersion) checkForUpdates(true);
+    return () => { delete window.__ekipOtaResult; };
+  }, []);
+
   const navigate = (next) => { setPage(next); setToast(''); };
   const nav = [
     { id: 'feed', label: 'Лента', icon: Home },
@@ -82,9 +135,15 @@ function App() {
     setSentMessages([...sentMessages, { chat: activeChat, text: chatMessage.trim() }]);
     setChatMessage('');
   };
-  const joinRoom = (title) => {
-    setJoinedRoom(joinedRoom === title ? '' : title);
-    notify(joinedRoom === title ? 'Вы вышли из комнаты' : `Вы в комнате «${title}»`);
+  const joinRoom = (roomId) => {
+    setJoinedRoom(roomId);
+    setPage('rooms');
+    const room = rooms.find(item => item.id === roomId);
+    notify(`Открыта комната: ${room?.title || 'комната экипа'}`);
+  };
+  const leaveRoom = () => {
+    setJoinedRoom('');
+    notify('Вы вышли из комнаты');
   };
 
   return <div className={`app-shell ${settings.darkMode ? 'dark-mode' : ''}`}>
@@ -99,7 +158,7 @@ function App() {
         </button>)}
       </nav>
       <div className="sidebar-room-head"><span className="side-caption">КОМНАТЫ РЯДОМ</span><button onClick={() => navigate('rooms')}><Plus size={16}/></button></div>
-      <button className="side-room side-room-empty" onClick={() => navigate('rooms')}><span>Пока нет комнат — создать</span><Plus size={14}/></button>
+      {rooms.slice(0,4).map(room => <button className={`side-room ${joinedRoom===room.id?'active-room':''}`} key={room.id} onClick={() => joinRoom(room.id)}><i className="empty-indicator"/><span>{room.title}</span><small>⋯</small></button>)}
       <div className="sidebar-bottom">
         <div className="shift-card"><div className="shift-icon"><HardDrive size={16}/></div><div><b>Медиа на устройстве</b><span>Локальное сохранение</span></div></div>
         <button className="sidebar-profile" onClick={() => navigate('profile')}><Avatar name="?" tone="yellow"/><span><b>Ваш профиль</b><small>Заполните данные</small></span><MoreHorizontal size={19}/></button>
@@ -116,9 +175,9 @@ function App() {
       <div className="page-content">
         {page === 'feed' && <FeedPage {...{ filter, setFilter, videos, videosLoading, onDeleteVideo: removeLocalVideo, setShowUpload, notify }} />}
         {page === 'chats' && <ChatsPage {...{ activeChat, setActiveChat, search, setSearch, sentMessages, chatMessage, setChatMessage, sendMessage, notify }} />}
-        {page === 'rooms' && <RoomsPage {...{ joinedRoom, joinRoom, muted, setMuted, notify }} />}
+        {page === 'rooms' && <RoomsPage joinedRoom={joinedRoom} onJoinRoom={joinRoom} onLeaveRoom={leaveRoom} />}
         {page === 'profile' && <ProfilePage {...{ navigate, notify }} />}
-        {page === 'settings' && <SettingsPage {...{ settings, setSettings, notify }} />}
+        {page === 'settings' && <SettingsPage {...{ settings, setSettings, notify, otaStatus, updateInfo, onCheckUpdates: () => checkForUpdates(false), onApplyUpdate: applyWebUpdate }} />}
       </div>
       <nav className="mobile-nav">
         {nav.map(({id,label,icon:Icon,badge}) => <button key={id} className={page === id ? 'active' : ''} onClick={() => navigate(id)}><span className="mobile-icon-wrap"><Icon size={20}/>{badge && <i>{badge}</i>}</span><small>{label}</small></button>)}
@@ -155,8 +214,15 @@ function ChatsPage() {
   return <div className="empty-section-page"><div className="page-heading"><div><div className="eyebrow">СООБЩЕНИЯ</div><h1>Чаты<span>.</span></h1><p>Личные и групповые переписки.</p></div></div><section className="empty-module"><div className="empty-module-icon"><MessageCircle size={27}/></div><h2>Чатов пока нет</h2><p>Здесь появятся ваши личные и групповые переписки.</p><span className="module-note">Сообщения между пользователями появятся после подключения сервера и аккаунтов.</span></section></div>;
 }
 
-function RoomsPage() {
-  return <div className="empty-section-page"><div className="page-heading"><div><div className="eyebrow"><span className="live-dot"/> ГОЛОСОВАЯ СВЯЗЬ</div><h1>Комнаты<span>.</span></h1><p>Голосовые комнаты для общения во время смены.</p></div></div><section className="empty-module"><div className="empty-module-icon"><Headphones size={27}/></div><h2>Комнат пока нет</h2><p>Список комнат будет здесь, когда подключится сообщество.</p><span className="module-note">Для настоящих голосовых звонков нужен сервер сигнализации/WebRTC.</span></section></div>;
+function RoomsPage({ joinedRoom, onJoinRoom, onLeaveRoom }) {
+  const current = rooms.find(room => room.id === joinedRoom);
+  return <div className="rooms-page">
+    <div className="page-heading"><div><div className="eyebrow"><span className="live-dot"/> КОМНАТЫ ВСЕГДА ОТКРЫТЫ</div><h1>Голосовые<span>.</span></h1><p>Заходи в общую или выбери свой город.</p></div></div>
+    {current && <section className="active-room-panel"><div className={`active-room-icon ${current.tone}`}><Headphones size={25}/></div><div className="active-room-copy"><span className="room-connected-label"><i/> ОТКРЫТА НА УСТРОЙСТВЕ</span><h2>{current.title}</h2><p>Комната открыта на этом устройстве. Сейчас присутствие других участников не отображается.</p></div><button className="button-secondary" onClick={onLeaveRoom}>Выйти</button></section>}
+    <div className="rooms-section-title"><div><h2>Постоянные комнаты</h2><p>Войти можно в любой момент — не нужно ждать инициатора.</p></div></div>
+    <div className="persistent-room-list">{rooms.map((room, index) => <article className={`persistent-room ${joinedRoom===room.id?'selected-room':''}`} key={room.id}><div className={`persistent-room-icon ${room.tone}`}>{room.global?<Radio size={22}/>:<MapPin size={22}/>}</div><div className="persistent-room-details"><div className="persistent-room-heading"><span className="persistent-room-type">{room.global?'ОБЩАЯ':'ГОРОДСКАЯ'}</span>{joinedRoom===room.id&&<span className="in-room-pill"><i/> ОТКРЫТА</span>}</div><h3>{room.title}</h3><p>{room.detail}</p><span className="persistent-room-status"><span className="empty-indicator"/> Постоянная комната · доступна для входа</span></div><button className={`room-enter-button ${joinedRoom===room.id?'in-room':''}`} onClick={() => onJoinRoom(room.id)}>{joinedRoom===room.id?'Открыта':'Зайти'}{joinedRoom===room.id?<Check size={15}/>:<ArrowUpRight size={15}/>}</button></article>)}</div>
+    <div className="voice-requirement-note"><Headphones size={16}/><span>Вход в комнату доступен сразу. Передача голоса между телефонами требует подключения голосового сервера.</span></div>
+  </div>;
 }
 
 function ProfilePage({ notify }) {
@@ -173,13 +239,13 @@ function ProfilePage({ notify }) {
   return <div className="profile-page"><div className="page-heading"><div><div className="eyebrow">ЛОКАЛЬНЫЙ ПРОФИЛЬ</div><h1>Профиль<span>.</span></h1><p>Данные сохраняются только на этом телефоне.</p></div></div><section className="empty-module profile-empty-module"><div className="profile-placeholder-avatar">{name ? name.slice(0,1).toUpperCase() : '?'}</div>{editing?<div className="profile-edit-local"><label htmlFor="profile-name">Как к вам обращаться?</label><input id="profile-name" maxLength={40} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Ваше имя"/><div><button className="button-secondary" onClick={() => setEditing(false)}>Отмена</button><button className="button-primary" onClick={save}>Сохранить</button></div></div>:<><h2>{name || 'Профиль не заполнен'}</h2><p>{name ? 'Имя сохранено на этом устройстве.' : 'Добавьте имя, чтобы видеть его рядом со своими видео.'}</p><button className="button-primary" onClick={() => { setDraft(name); setEditing(true); }}>{name?'Изменить имя':'Добавить имя'}</button></>}</section></div>;
 }
 
-function SettingsPage({ settings, setSettings, notify }) {
+function SettingsPage({ settings, setSettings, notify, otaStatus, updateInfo, onCheckUpdates, onApplyUpdate }) {
   const rows = [
     { key:'notifications', icon:Bell, title:'Уведомления', desc:'Сообщения, реакции и эфиры' },
     { key:'darkMode', icon:Activity, title:'Тёмная тема', desc:'Бережёт глаза в вечернюю смену' },
     { key:'location', icon:MapPin, title:'Показывать город', desc:'Чтобы находить курьеров рядом' },
   ];
-  return <div className="settings-page"><div className="page-heading"><div><div className="eyebrow">ПОД ТВОЙ РИТМ</div><h1>Настройки<span>.</span></h1><p>Настрой экип так, как удобно тебе.</p></div></div><div className="settings-layout"><div className="settings-menu"><button className="selected"><Settings size={17}/> Основные</button><button onClick={() => notify('Настройки приватности')}><ShieldCheck size={17}/> Приватность</button><button onClick={() => notify('Настройки аккаунта')}><Users size={17}/> Аккаунт</button><button onClick={() => notify('Справка появится скоро')}><CircleHelp size={17}/> Помощь</button></div><section className="settings-card"><div className="settings-card-head"><div><h2>Основные</h2><p>Общие настройки приложения</p></div></div>{rows.map(({key,icon:Icon,title,desc})=><div className="setting-row" key={key}><div className="setting-icon"><Icon size={18}/></div><div className="setting-copy"><b>{title}</b><span>{desc}</span></div><button className={`toggle ${settings[key]?'on':''}`} onClick={() => { setSettings({...settings,[key]:!settings[key]}); notify(`${title}: ${settings[key]?'выключено':'включено'}`); }} aria-label={`Переключить ${title}`}><i/></button></div>)}<div className="settings-divider"/><button className="setting-link" onClick={() => notify('Версия 1.0 · Экип')}><span>О приложении</span><small>Версия 1.0.0</small><ChevronRight size={16}/></button><button className="setting-link" onClick={() => notify('Условия использования')}><span>Правила экипа</span><ChevronRight size={16}/></button></section></div></div>;
+  return <div className="settings-page"><div className="page-heading"><div><div className="eyebrow">ПОД ТВОЙ РИТМ</div><h1>Настройки<span>.</span></h1><p>Настрой экип так, как удобно тебе.</p></div></div><div className="settings-layout"><div className="settings-menu"><button className="selected"><Settings size={17}/> Основные</button><button onClick={() => notify('Настройки приватности')}><ShieldCheck size={17}/> Приватность</button><button onClick={() => notify('Настройки аккаунта')}><Users size={17}/> Аккаунт</button><button onClick={() => notify('Справка появится скоро')}><CircleHelp size={17}/> Помощь</button></div><section className="settings-card"><div className="settings-card-head"><div><h2>Основные</h2><p>Общие настройки приложения</p></div></div>{rows.map(({key,icon:Icon,title,desc})=><div className="setting-row" key={key}><div className="setting-icon"><Icon size={18}/></div><div className="setting-copy"><b>{title}</b><span>{desc}</span></div><button className={`toggle ${settings[key]?'on':''}`} onClick={() => { setSettings({...settings,[key]:!settings[key]}); notify(`${title}: ${settings[key]?'выключено':'включено'}`); }} aria-label={`Переключить ${title}`}><i/></button></div>)}<div className="settings-divider"/><section className="ota-card"><div className="ota-card-heading"><span className="setting-icon"><CloudDownload size={18}/></span><div><b>Обновление приложения</b><span>Загружать свежую версию по воздуху</span></div></div><div className={`ota-status ota-${otaStatus}`} role="status">{otaStatus === 'checking' ? 'Проверяю обновления…' : otaStatus === 'downloading' ? 'Загружаю и устанавливаю…' : otaStatus === 'available' ? `Доступно обновление ${updateInfo?.webVersion ?? ''}` : otaStatus === 'current' ? 'Установлена актуальная версия' : otaStatus === 'error' ? 'Проверка не удалась. Попробуйте ещё раз.' : otaStatus === 'native-only' ? 'Автообновление доступно в Android-приложении' : 'Проверить наличие обновлений'}</div><div className="ota-actions"><button className="button-secondary" onClick={onCheckUpdates} disabled={otaStatus === 'checking' || otaStatus === 'downloading'}><RefreshCw size={14}/> Проверить</button>{otaStatus === 'available'&&<button className="button-primary" onClick={onApplyUpdate}><CloudDownload size={14}/> Обновить</button>}</div><small>Обновляется интерфейс приложения. Для исправлений Android-части нужно установить новый APK.</small></section><button className="setting-link" onClick={() => notify('Экип · версия 1.0.0')}><span>О приложении</span><small>Версия 1.0.0</small><ChevronRight size={16}/></button><button className="setting-link" onClick={() => notify('Условия использования')}><span>Правила экипа</span><ChevronRight size={16}/></button></section></div></div>;
 }
 
 function UploadModal({ onClose, onDone }) {

@@ -41,19 +41,23 @@ MANIFEST
   -I "$ANDROID_JAR" \
   --min-sdk-version 24 \
   --target-sdk-version 35 \
-  --version-code 1 \
-  --version-name 1.0.0 \
+  --version-code "${EKIP_APK_VERSION_CODE:-2}" \
+  --version-name "${EKIP_APK_VERSION_NAME:-1.1.0}" \
   --auto-add-overlay \
   --java "$BUILD/generated" \
   -o "$BUILD/base.apk" \
   "$BUILD/resources.zip"
 
+WEB_VERSION="${EKIP_WEB_VERSION:-2}"
+[[ "$WEB_VERSION" =~ ^[0-9]{1,9}$ ]] || { echo "EKIP_WEB_VERSION must be a positive integer" >&2; exit 1; }
 javac -encoding UTF-8 -source 8 -target 8 -classpath "$ANDROID_JAR" -d "$BUILD/classes" \
   "$ROOT/android/app/src/main/java/ru/ekip/couriers/MainActivity.java"
 mapfile -d '' CLASS_FILES < <(find "$BUILD/classes" -type f -name '*.class' -print0)
 "$BUILD_TOOLS/d8" --release --min-api 24 --lib "$ANDROID_JAR" --output "$BUILD/dex" "${CLASS_FILES[@]}"
 cp "$BUILD/dex/classes.dex" "$BUILD/classes.dex"
 cp -R "$ROOT/android/app/src/main/assets/public" "$BUILD/assets/public"
+printf '%s\n' "$WEB_VERSION" > "$ROOT/dist/ota-version.txt"
+printf '%s\n' "$WEB_VERSION" > "$BUILD/assets/public/ota-version.txt"
 
 (cd "$BUILD" && zip -q -0 base.apk classes.dex && zip -q -r base.apk assets)
 mkdir -p "$(dirname "$OUTPUT")"
