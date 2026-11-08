@@ -27,6 +27,9 @@ import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
+import android.text.InputType;
+import android.text.TextWatcher;
+import android.text.Editable;
 import android.view.Gravity;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -74,8 +77,19 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private static final int ACCENT = Color.rgb(80, 210, 192);
     private static final int ACCENT_2 = Color.rgb(143, 161, 255);
     private static final int RED = Color.rgb(255, 105, 125);
-    private static final String[] CITY_IDS = {"spb", "moscow", "kazan", "ekb", "novosibirsk", "krasnodar", "nizhny", "vladivostok"};
-    private static final String[] CITY_NAMES = {"Санкт-Петербург", "Москва", "Казань", "Екатеринбург", "Новосибирск", "Краснодар", "Нижний Новгород", "Владивосток"};
+    private static final String[] CITY_NAMES = {
+            "Абакан", "Архангельск", "Астрахань", "Балаково", "Балашиха", "Барнаул", "Белгород", "Бийск", "Благовещенск", "Братск", "Брянск",
+            "Великий Новгород", "Владивосток", "Владикавказ", "Владимир", "Волгоград", "Вологда", "Воронеж", "Грозный", "Дзержинск", "Домодедово",
+            "Екатеринбург", "Иваново", "Ижевск", "Иркутск", "Йошкар-Ола", "Казань", "Калининград", "Калуга", "Каменск-Уральский", "Кемерово", "Киров",
+            "Кисловодск", "Королёв", "Кострома", "Краснодар", "Красноярск", "Красногорск", "Курган", "Курск", "Липецк", "Люберцы", "Магадан",
+            "Магнитогорск", "Махачкала", "Миасс", "Москва", "Мурманск", "Муром", "Мытищи", "Набережные Челны", "Нальчик", "Находка", "Нефтекамск",
+            "Нижневартовск", "Нижний Новгород", "Нижний Тагил", "Новокузнецк", "Новомосковск", "Новороссийск", "Новосибирск", "Норильск", "Одинцово",
+            "Омск", "Орёл", "Оренбург", "Орск", "Пенза", "Пермь", "Петрозаводск", "Подольск", "Псков", "Пушкино", "Пятигорск", "Реутов",
+            "Ростов-на-Дону", "Рубцовск", "Рязань", "Самара", "Санкт-Петербург", "Саранск", "Саратов", "Севастополь", "Симферополь", "Смоленск",
+            "Сочи", "Ставрополь", "Старый Оскол", "Сургут", "Сыктывкар", "Таганрог", "Тамбов", "Тверь", "Тольятти", "Томск", "Тула", "Тюмень",
+            "Улан-Удэ", "Ульяновск", "Уфа", "Хабаровск", "Ханты-Мансийск", "Химки", "Чебоксары", "Челябинск", "Череповец", "Чита", "Шахты",
+            "Элиста", "Электросталь", "Южно-Сахалинск", "Якутск", "Ярославль"
+    };
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final ArrayList<VideoItem> videos = new ArrayList<>();
@@ -110,7 +124,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private boolean muted = false;
     private boolean copyingVideo = false;
     private String profileName = "";
-    private String cityId = "spb";
+    private String cityId = "city:санкт-петербург";
+    private String customCityName = "";
     private Dialog updateProgressDialog;
     private TextView updateProgressTitle;
     private TextView updateProgressDetail;
@@ -144,8 +159,17 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             }
         } catch (Exception ignored) { }
         if (videos.size() > 0) currentVideoIndex = Math.max(0, Math.min(prefs.getInt("video_index", 0), videos.size() - 1));
-        cityId = prefs.getString("city_id", "spb");
-        if (cityIndex(cityId) < 0) cityId = "spb";
+        String savedCity = prefs.getString("city_id", "spb");
+        if (savedCity.startsWith("custom:")) {
+            customCityName = prefs.getString("custom_city_name", savedCity.substring("custom:".length()));
+            if (customCityName == null || customCityName.trim().isEmpty()) customCityName = savedCity.substring("custom:".length());
+            cityId = customCityKey(customCityName);
+        } else {
+            int index = cityIndex(savedCity);
+            if (index < 0) index = cityIndex("spb");
+            cityId = cityKey(index < 0 ? 0 : index);
+            prefs.edit().putString("city_id", cityId).apply();
+        }
         rebuildAccessibleRooms();
     }
 
@@ -313,39 +337,52 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout empty = new LinearLayout(this);
         empty.setOrientation(LinearLayout.VERTICAL);
         empty.setGravity(Gravity.CENTER);
-        empty.setPadding(dp(34), dp(32), dp(34), dp(34));
-        ImageView mark = new ImageView(this);
-        mark.setImageResource(ru.ekip.couriers.R.drawable.ekip_delivery_logo);
-        mark.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        mark.setBackgroundColor(INK);
-        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(218), dp(218));
-        markParams.bottomMargin = dp(15);
-        empty.addView(mark, markParams);
-        TextView eyebrow = text("ТВОЯ ВИДЕОМЕДИАТЕКА", 11, ACCENT, true);
+        empty.setPadding(dp(24), dp(26), dp(24), dp(26));
+        empty.setBackground(round(Color.rgb(17, 27, 37), 28));
+        empty.setElevation(dp(4));
+
+        FrameLayout iconTile = new FrameLayout(this);
+        iconTile.setBackground(round(0x2250D2C0, 23));
+        TextView plus = roundIconButton("add", ACCENT, INK, 52);
+        plus.setTextSize(30);
+        plus.setBackground(ripple(round(ACCENT, 20)));
+        FrameLayout.LayoutParams plusParams = new FrameLayout.LayoutParams(dp(58), dp(58), Gravity.CENTER);
+        iconTile.addView(plus, plusParams);
+        LinearLayout.LayoutParams tileParams = new LinearLayout.LayoutParams(dp(76), dp(76));
+        tileParams.bottomMargin = dp(22);
+        empty.addView(iconTile, tileParams);
+        plus.setOnClickListener(view -> openVideoPicker());
+
+        TextView eyebrow = text("ТВОЯ ВИДЕОМЕДИАТЕКА", 10, ACCENT, true);
         eyebrow.setLetterSpacing(.12f);
         eyebrow.setGravity(Gravity.CENTER);
         empty.addView(eyebrow);
-        TextView title = text("Здесь пока пусто", 24, Color.WHITE, true);
+        TextView title = text("Первое видео\nначинается здесь", 23, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
+        title.setLineSpacing(dp(2), 1f);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
-        titleParams.topMargin = dp(12);
+        titleParams.topMargin = dp(11);
         empty.addView(title, titleParams);
-        TextView subtitle = text("Выбери ролик — он сохранится в приложении и будет доступен после перезапуска.", 14, 0xFFB4B6BE, false);
+        TextView subtitle = text("Добавь ролик с телефона — он останется только у тебя и будет доступен после перезапуска.", 13, 0xFFB4C0CA, false);
         subtitle.setGravity(Gravity.CENTER);
-        subtitle.setLineSpacing(dp(3), 1f);
+        subtitle.setLineSpacing(dp(4), 1f);
         LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
-        subtitleParams.topMargin = dp(9);
-        subtitleParams.bottomMargin = dp(24);
+        subtitleParams.topMargin = dp(10);
+        subtitleParams.bottomMargin = dp(21);
         empty.addView(subtitle, subtitleParams);
         TextView choose = pillButton("＋   Выбрать видео", ACCENT, INK, 15);
         choose.setOnClickListener(view -> openVideoPicker());
-        empty.addView(choose, new LinearLayout.LayoutParams(-1, dp(54)));
-        TextView privacy = text("ХРАНИТСЯ ТОЛЬКО НА ЭТОМ ТЕЛЕФОНЕ", 9, MUTED, true);
+        empty.addView(choose, new LinearLayout.LayoutParams(-1, dp(52)));
+        TextView privacy = text("СОХРАНЯЕТСЯ НА ЭТОМ ТЕЛЕФОНЕ", 9, MUTED, true);
         privacy.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams privacyParams = new LinearLayout.LayoutParams(-1, -2);
-        privacyParams.topMargin = dp(17);
+        privacyParams.topMargin = dp(16);
         empty.addView(privacy, privacyParams);
-        feed.addView(empty, centered());
+
+        FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER);
+        cardParams.leftMargin = dp(22);
+        cardParams.rightMargin = dp(22);
+        feed.addView(empty, cardParams);
         addFeedTopBar(feed);
     }
 
@@ -372,7 +409,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             TextView add = roundIconButton("add", ACCENT, INK, 48);
             add.setContentDescription("Добавить видео");
             add.setOnClickListener(view -> openVideoPicker());
-            top.addView(add);
+            top.addView(add, new LinearLayout.LayoutParams(dp(48), dp(48)));
         }
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-1, dp(70), Gravity.TOP);
         feed.addView(top, params);
@@ -775,24 +812,176 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void showCityPicker() {
-        int selected = Math.max(0, cityIndex(cityId));
-        new AlertDialog.Builder(this)
-                .setTitle("Выберите свой город")
-                .setSingleChoiceItems(CITY_NAMES, selected, (dialog, which) -> {
-                    setCity(CITY_IDS[which]);
-                    dialog.dismiss();
-                })
-                .setNegativeButton("Отмена", null)
-                .show();
+        Dialog dialog = new Dialog(this);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(20), dp(20), dp(20), dp(16));
+        card.setBackground(round(SURFACE, 26));
+        TextView eyebrow = text("КУРЬЕРКА  ·  ГОРОД", 10, ACCENT, true);
+        eyebrow.setLetterSpacing(.1f);
+        card.addView(eyebrow);
+        TextView title = text("Выберите свой город", 20, Color.WHITE, true);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
+        titleParams.topMargin = dp(8);
+        card.addView(title, titleParams);
+        TextView subtitle = text("Городская голосовая будет только для вашего города", 12, MUTED, false);
+        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
+        subtitleParams.topMargin = dp(4);
+        subtitleParams.bottomMargin = dp(14);
+        card.addView(subtitle, subtitleParams);
+
+        EditText search = new EditText(this);
+        search.setSingleLine(true);
+        search.setTextSize(14);
+        search.setTextColor(Color.WHITE);
+        search.setHintTextColor(MUTED);
+        search.setHint("Найти город");
+        search.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        search.setPadding(dp(14), 0, dp(14), 0);
+        search.setBackground(round(SURFACE_2, 15));
+        card.addView(search, new LinearLayout.LayoutParams(-1, dp(50)));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(list);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, dp(390));
+        scrollParams.topMargin = dp(10);
+        card.addView(scroll, scrollParams);
+        populateCityRows(list, "", dialog);
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) { populateCityRows(list, value.toString(), dialog); }
+            @Override public void afterTextChanged(Editable value) { }
+        });
+        dialog.setContentView(card);
+        dialog.setCancelable(true);
+        dialog.show();
+        styleDialogWindow(dialog);
+    }
+
+    private void populateCityRows(LinearLayout list, String query, Dialog picker) {
+        list.removeAllViews();
+        String normalized = query == null ? "" : query.trim().toLowerCase(Locale.ROOT).replace('ё', 'е');
+        int found = 0;
+        for (int i = 0; i < CITY_NAMES.length; i++) {
+            final int cityIndex = i;
+            String name = CITY_NAMES[i];
+            if (!normalized.isEmpty() && !name.toLowerCase(Locale.ROOT).replace('ё', 'е').contains(normalized)) continue;
+            found++;
+            boolean selected = cityKey(i).equals(cityId);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(12), 0, dp(12), 0);
+            row.setBackground(ripple(round(selected ? 0x2250D2C0 : Color.TRANSPARENT, 15)));
+            TextView marker = text(selected ? "●" : "○", 18, selected ? ACCENT : MUTED, true);
+            marker.setGravity(Gravity.CENTER);
+            row.addView(marker, new LinearLayout.LayoutParams(dp(30), dp(46)));
+            TextView label = text(name, 14, selected ? Color.WHITE : 0xFFE0E6EC, selected);
+            LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -1, 1f);
+            labelParams.leftMargin = dp(9);
+            row.addView(label, labelParams);
+            row.setOnClickListener(view -> {
+                setCity(cityKey(cityIndex));
+                picker.dismiss();
+            });
+            list.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
+        }
+        if (found == 0) {
+            TextView empty = text("Такого города нет в списке — укажите его вручную ниже.", 13, MUTED, false);
+            empty.setPadding(dp(12), dp(14), dp(12), dp(14));
+            list.addView(empty, new LinearLayout.LayoutParams(-1, -2));
+        }
+        TextView custom = text("＋   Указать другой город", 14, ACCENT, true);
+        custom.setGravity(Gravity.CENTER_VERTICAL);
+        custom.setPadding(dp(12), dp(4), dp(12), dp(4));
+        custom.setBackground(ripple(round(0x1A50D2C0, 15)));
+        LinearLayout.LayoutParams customParams = new LinearLayout.LayoutParams(-1, dp(50));
+        customParams.topMargin = dp(6);
+        list.addView(custom, customParams);
+        custom.setOnClickListener(view -> {
+            picker.dismiss();
+            showCustomCityDialog();
+        });
+    }
+
+    private void showCustomCityDialog() {
+        LinearLayout card = updateDialogCard("ВАШ ГОРОД", "Укажите город", "Название сохранится на этом устройстве.");
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setTextSize(15);
+        input.setTextColor(Color.WHITE);
+        input.setHintTextColor(MUTED);
+        input.setHint("Например, Тверь");
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setPadding(dp(14), 0, dp(14), 0);
+        input.setBackground(round(SURFACE_2, 14));
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(-1, dp(52));
+        inputParams.topMargin = dp(16);
+        card.addView(input, inputParams);
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        TextView cancel = pillButton("Отмена", SURFACE_2, Color.WHITE, 13);
+        TextView save = pillButton("Сохранить", ACCENT, INK, 13);
+        buttons.addView(cancel, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        saveParams.leftMargin = dp(10);
+        buttons.addView(save, saveParams);
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(-1, -2);
+        buttonParams.topMargin = dp(16);
+        card.addView(buttons, buttonParams);
+        Dialog dialog = createRoundedDialog(card);
+        cancel.setOnClickListener(view -> dialog.dismiss());
+        save.setOnClickListener(view -> {
+            String name = input.getText().toString().trim().replaceAll("\\s+", " ");
+            if (name.length() < 2) {
+                input.setError("Введите название города");
+                return;
+            }
+            if (name.length() > 48) {
+                input.setError("Слишком длинное название");
+                return;
+            }
+            dialog.dismiss();
+            setCustomCity(name);
+        });
     }
 
     private void setCity(String newCityId) {
-        if (cityIndex(newCityId) < 0 || newCityId.equals(cityId)) return;
-        cityId = newCityId;
-        getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putString("city_id", cityId).apply();
+        int index = cityIndex(newCityId);
+        if (index < 0) return;
+        String canonicalId = cityKey(index);
+        if (canonicalId.equals(cityId)) return;
+        cityId = canonicalId;
+        customCityName = "";
+        getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putString("city_id", cityId).remove("custom_city_name").apply();
+        onCityChanged();
+    }
+
+    private void setCustomCity(String name) {
+        String normalized = name.trim().replaceAll("\\s+", " ");
+        if (normalized.isEmpty()) return;
+        int catalogIndex = cityIndex(normalized);
+        if (catalogIndex >= 0) {
+            setCity(cityKey(catalogIndex));
+            return;
+        }
+        cityId = customCityKey(normalized);
+        customCityName = normalized;
+        getSharedPreferences("ekip_native", MODE_PRIVATE).edit()
+                .putString("city_id", cityId)
+                .putString("custom_city_name", customCityName)
+                .apply();
+        onCityChanged();
+    }
+
+    private void onCityChanged() {
         rebuildAccessibleRooms();
         if (joinedRoomId != null && !"common".equals(joinedRoomId) && !joinedRoomId.equals(cityId)) joinedRoomId = null;
-        Toast.makeText(this, "Город изменён: " + cityName(), Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Город: " + cityName(), Toast.LENGTH_SHORT).show();
         renderPage();
     }
 
@@ -1007,6 +1196,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         Window window = dialog.getWindow();
         if (window == null) return;
         window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         int width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(36), dp(390));
         window.setLayout(Math.max(dp(280), width), WindowManager.LayoutParams.WRAP_CONTENT);
         window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
@@ -1395,13 +1585,39 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private int cityIndex(String id) {
-        for (int i = 0; i < CITY_IDS.length; i++) if (CITY_IDS[i].equals(id)) return i;
+        if (id == null) return -1;
+        String value = id.trim();
+        if (value.startsWith("city:")) value = value.substring("city:".length());
+        else if (value.startsWith("city-")) {
+            try {
+                int index = Integer.parseInt(value.substring("city-".length()));
+                return index >= 0 && index < CITY_NAMES.length ? index : -1;
+            } catch (NumberFormatException ignored) { return -1; }
+        }
+        if ("spb".equals(value)) value = "Санкт-Петербург";
+        else if ("moscow".equals(value)) value = "Москва";
+        else if ("kazan".equals(value)) value = "Казань";
+        else if ("ekb".equals(value)) value = "Екатеринбург";
+        else if ("novosibirsk".equals(value)) value = "Новосибирск";
+        else if ("krasnodar".equals(value)) value = "Краснодар";
+        else if ("nizhny".equals(value)) value = "Нижний Новгород";
+        else if ("vladivostok".equals(value)) value = "Владивосток";
+        for (int i = 0; i < CITY_NAMES.length; i++) if (CITY_NAMES[i].equalsIgnoreCase(value)) return i;
         return -1;
     }
 
+    private String cityKey(int index) { return "city:" + CITY_NAMES[index].toLowerCase(Locale.ROOT); }
+
+    private String customCityKey(String name) {
+        return "custom:" + name.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    }
+
     private String cityName() {
+        if (cityId != null && cityId.startsWith("custom:") && customCityName != null && !customCityName.trim().isEmpty()) return customCityName;
         int index = cityIndex(cityId);
-        return index < 0 ? CITY_NAMES[0] : CITY_NAMES[index];
+        if (index >= 0) return CITY_NAMES[index];
+        int defaultIndex = cityIndex("spb");
+        return CITY_NAMES[defaultIndex < 0 ? 0 : defaultIndex];
     }
 
     private RoomItem findRoom(String id) {
