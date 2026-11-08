@@ -3,9 +3,14 @@ package ru.ekip.couriers;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.PictureInPictureParams;
+import android.app.PendingIntent;
+import android.app.RemoteAction;
 import android.app.Dialog;
 import android.Manifest;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
@@ -16,6 +21,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.drawable.Icon;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
@@ -76,6 +82,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -87,6 +94,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private static final int UPDATE_INSTALL_REQUEST = 4104;
     private static final int PICK_AVATAR_REQUEST = 4105;
     private static final int MICROPHONE_PERMISSION_REQUEST = 4106;
+    private static final String ACTION_PIP_PLAY_PAUSE = "ru.ekip.couriers.action.PIP_PLAY_PAUSE";
     private static final String UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/update.json";
     private static final String UPDATE_APK_PREFIX = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/ekip-debug.apk";
     private static final int INK = Color.rgb(14, 13, 11);
@@ -111,6 +119,16 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     };
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
+    private final BroadcastReceiver pictureInPictureActionReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (ACTION_PIP_PLAY_PAUSE.equals(intent.getAction()) && Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode()) {
+                togglePlayback();
+            }
+        }
+    };
+    private boolean pictureInPictureActionReceiverRegistered;
+    private boolean enteringPictureInPicture;
+    private View pipFeedTopBar, pipFeedGradientTop, pipFeedGradientBottom, pipFeedDetails, pipFeedSideControls, pipFeedPlaybackControls;
     private final ArrayList<VideoItem> videos = new ArrayList<>();
     private final ArrayList<RoomItem> rooms = new ArrayList<>();
     private final Runnable updateProgress = new Runnable() {
@@ -177,9 +195,17 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         getWindow().getDecorView().setSystemUiVisibility(0);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        registerPictureInPictureActionReceiver();
         loadLocalState();
         buildShell();
         renderPage();
+    }
+
+    private void registerPictureInPictureActionReceiver() {
+        IntentFilter filter = new IntentFilter(ACTION_PIP_PLAY_PAUSE);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(pictureInPictureActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(pictureInPictureActionReceiver, filter);
+        pictureInPictureActionReceiverRegistered = true;
     }
 
     private void loadLocalState() {
@@ -358,7 +384,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         textureView.setSurfaceTextureListener(this);
         feed.addView(textureView, new FrameLayout.LayoutParams(-1, -1));
         GestureDetector gestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            @Override public boolean onSingleTapUp(MotionEvent event) { togglePlayback(); return true; }
+            @Override public boolean onSingleTapUp(MotionEvent event) {
+                if (Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode()) return true;
+                togglePlayback();
+                return true;
+            }
             @Override public boolean onDown(MotionEvent event) { return true; }
             @Override public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
                 if (e1 == null || e2 == null) return false;
@@ -433,6 +463,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void addFeedTopBar(FrameLayout feed) {
         LinearLayout top = new LinearLayout(this);
+        pipFeedTopBar = top;
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setPadding(dp(16), dp(12), dp(16), dp(8));
@@ -463,10 +494,12 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void addFeedGradient(FrameLayout feed) {
         View gradientTop = new View(this);
+        pipFeedGradientTop = gradientTop;
         gradientTop.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xB8000000, 0x00000000}));
         FrameLayout.LayoutParams top = new FrameLayout.LayoutParams(-1, dp(135), Gravity.TOP);
         feed.addView(gradientTop, top);
         View gradientBottom = new View(this);
+        pipFeedGradientBottom = gradientBottom;
         gradientBottom.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[]{0xE8000000, 0x00000000}));
         FrameLayout.LayoutParams bottom = new FrameLayout.LayoutParams(-1, dp(240), Gravity.BOTTOM);
         feed.addView(gradientBottom, bottom);
@@ -475,6 +508,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private void addFeedVideoDetails(FrameLayout feed) {
         VideoItem video = videos.get(currentVideoIndex);
         LinearLayout info = new LinearLayout(this);
+        pipFeedDetails = info;
         info.setOrientation(LinearLayout.VERTICAL);
         info.setPadding(dp(18), 0, dp(84), dp(16));
 
@@ -524,6 +558,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void addFeedControls(FrameLayout feed) {
         LinearLayout side = new LinearLayout(this);
+        pipFeedSideControls = side;
         side.setOrientation(LinearLayout.VERTICAL);
         side.setGravity(Gravity.CENTER_HORIZONTAL);
         side.setPadding(dp(8), dp(8), dp(8), dp(8));
@@ -547,6 +582,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         feed.addView(side, sideParams);
 
         LinearLayout playback = new LinearLayout(this);
+        pipFeedPlaybackControls = playback;
         playback.setOrientation(LinearLayout.HORIZONTAL);
         playback.setGravity(Gravity.CENTER_VERTICAL);
         playback.setPadding(dp(15), 0, dp(15), 0);
@@ -2127,6 +2163,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 handler.post(updateProgress);
             }
         } catch (Exception ignored) { }
+        refreshPictureInPictureActions();
     }
 
     private void preparePlayer(SurfaceTexture surfaceTexture) {
@@ -2153,6 +2190,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                     playOverlay.setText("▶");
                     playOverlay.setVisibility(View.VISIBLE);
                 }
+                refreshPictureInPictureActions();
             });
             player.setOnVideoSizeChangedListener((mediaPlayer, width, height) -> {
                 videoWidth = width;
@@ -2204,6 +2242,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         playOverlay = null;
         seekBar = null;
         videoTime = null;
+        pipFeedTopBar = pipFeedGradientTop = pipFeedGradientBottom = pipFeedDetails = pipFeedSideControls = pipFeedPlaybackControls = null;
     }
 
     @Override public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
@@ -2678,20 +2717,57 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
                 .setAspectRatio(new Rational(Math.max(1, Math.round(ratio * 1000)), 1000));
         if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(true);
+        if ("feed".equals(activeTab) && player != null) {
+            boolean playing = player.isPlaying();
+            Intent actionIntent = new Intent(ACTION_PIP_PLAY_PAUSE).setPackage(getPackageName());
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+            PendingIntent actionPendingIntent = PendingIntent.getBroadcast(this, 4110, actionIntent, flags);
+            int iconResource = playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play;
+            String actionTitle = playing ? "Пауза" : "Воспроизвести";
+            RemoteAction playPause = new RemoteAction(Icon.createWithResource(this, iconResource), actionTitle, actionTitle, actionPendingIntent);
+            builder.setActions(Collections.singletonList(playPause));
+        }
         return builder.build();
+    }
+
+    private void refreshPictureInPictureActions() {
+        if (Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode() && "feed".equals(activeTab)) {
+            try { setPictureInPictureParams(pictureInPictureParams()); } catch (Exception ignored) { }
+        }
+    }
+
+    private void setPictureInPictureFeedUi(boolean inPictureInPicture) {
+        View[] overlays = {pipFeedTopBar, pipFeedGradientTop, pipFeedGradientBottom, pipFeedDetails, pipFeedSideControls, pipFeedPlaybackControls};
+        for (View overlay : overlays) {
+            if (overlay != null) overlay.setVisibility(inPictureInPicture ? View.GONE : View.VISIBLE);
+        }
     }
 
     @Override protected void onUserLeaveHint() {
         super.onUserLeaveHint();
         if (Build.VERSION.SDK_INT >= 26 && shouldEnterPictureInPicture()) {
-            try { enterPictureInPictureMode(pictureInPictureParams()); } catch (Exception ignored) { }
+            enteringPictureInPicture = true;
+            try {
+                if (!enterPictureInPictureMode(pictureInPictureParams())) enteringPictureInPicture = false;
+            } catch (Exception ignored) { enteringPictureInPicture = false; }
         }
     }
 
     @Override public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        enteringPictureInPicture = false;
         if (bottomNavigation != null) bottomNavigation.setVisibility(isInPictureInPictureMode ? View.GONE : View.VISIBLE);
-        if (isInPictureInPictureMode && player != null && player.isPlaying()) handler.post(updateProgress);
+        if ("feed".equals(activeTab)) {
+            setPictureInPictureFeedUi(isInPictureInPictureMode);
+            if (isInPictureInPictureMode) {
+                if (player != null && userWantsPlayback && !player.isPlaying()) {
+                    try { player.start(); } catch (Exception ignored) { }
+                }
+                if (textureView != null) textureView.post(this::applyVideoTransform);
+                handler.post(updateProgress);
+                refreshPictureInPictureActions();
+            }
+        }
     }
 
     @Override protected void onResume() {
@@ -2707,10 +2783,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     @Override protected void onPause() {
         boolean inPictureInPicture = Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode();
-        if (!inPictureInPicture && player != null && player.isPlaying()) {
+        if (!inPictureInPicture && !enteringPictureInPicture && player != null && player.isPlaying()) {
             try { player.pause(); userWantsPlayback = true; } catch (Exception ignored) { }
         }
-        if (!inPictureInPicture && microphoneEnabled) {
+        if (!inPictureInPicture && !enteringPictureInPicture && microphoneEnabled) {
             microphoneEnabled = false;
             stopMicrophoneCapture();
             microphoneWasStoppedForPause = true;
@@ -2726,6 +2802,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         handler.removeCallbacks(releaseFeedbackAudioTrack);
         releaseFeedbackAudioTrack.run();
         releasePlayer();
+        if (pictureInPictureActionReceiverRegistered) {
+            try { unregisterReceiver(pictureInPictureActionReceiver); } catch (Exception ignored) { }
+            pictureInPictureActionReceiverRegistered = false;
+        }
         ioExecutor.shutdownNow();
         super.onDestroy();
     }
