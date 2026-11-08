@@ -310,12 +310,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         empty.setGravity(Gravity.CENTER);
         empty.setPadding(dp(34), dp(32), dp(34), dp(34));
         ImageView mark = new ImageView(this);
-        mark.setImageResource(ru.ekip.couriers.R.drawable.ekip_mascot);
+        mark.setImageResource(ru.ekip.couriers.R.drawable.ekip_delivery_logo);
         mark.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        mark.setBackground(round(INK, 22));
-        mark.setClipToOutline(true);
-        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(250), dp(138));
-        markParams.bottomMargin = dp(17);
+        mark.setBackgroundColor(INK);
+        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(218), dp(218));
+        markParams.bottomMargin = dp(15);
         empty.addView(mark, markParams);
         TextView eyebrow = text("ТВОЯ ВИДЕОМЕДИАТЕКА", 11, ACCENT, true);
         eyebrow.setLetterSpacing(.12f);
@@ -352,9 +351,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         top.setPadding(dp(16), dp(12), dp(16), dp(8));
         ImageView logo = new ImageView(this);
         try { logo.setImageResource(ru.ekip.couriers.R.mipmap.ic_launcher); } catch (Exception ignored) { }
-        logo.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        logo.setBackground(round(SURFACE, 12));
-        logo.setClipToOutline(true);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setBackgroundColor(Color.TRANSPARENT);
         top.addView(logo, new LinearLayout.LayoutParams(dp(37), dp(37)));
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);

@@ -12,7 +12,7 @@ The bottom navigation has a prominent round microphone action. The room list is 
 
 ## Brand and visual system
 
-The app uses a dark slate/teal palette and a 3D swift-messenger mascot. The former yellow treatment has been removed from the launcher, splash screen, and primary controls.
+The launcher, splash screen, and empty-feed hero use the square 3D raccoon courier logo based on the supplied “Курьерка Чат · Санкт-Петербург” reference. The logo artwork is kept square for the app; Android launchers may apply their own icon mask on the home screen.
 
 ## Android updates and permanent signing
 
