@@ -1,7 +1,7 @@
 {
-  "versionCode": 1020,
-  "versionName": "2.0.20",
+  "versionCode": 1021,
+  "versionName": "2.0.21",
   "apkUrl": "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/ekip-debug.apk",
-  "sha256": "b6cfdc5fe36eb514152df0b9006ab2fd647f1d80df89950802dee9c40113fbed",
+  "sha256": "1451163b90b454eb0ec8bc44a0947f4a095f3552f9cf089511292089ade87d4a",
   "persistentSigning": true
 }
