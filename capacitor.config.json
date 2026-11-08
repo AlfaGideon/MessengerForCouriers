@@ -1,0 +1,8 @@
+{
+  "appId": "ru.ekip.couriers",
+  "appName": "Экип",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
