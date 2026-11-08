@@ -16,7 +16,7 @@ The native Settings screen checks `release/update.json`, downloads the APK direc
 
 In GitHub repository **Settings → Secrets and variables → Actions**, add these repository secrets:
 
-- `EKIP_SIGNING_KEYSTORE_B64` — one-line Base64 encoding of your private `.jks` file.
+- `EKIP_SIGNING_KEYSTORE_B64` — one-line Base64 encoding of your private `.jks` or `.p12` keystore.
 - `EKIP_SIGNING_STORE_PASSWORD` — keystore password.
 - `EKIP_SIGNING_KEY_ALIAS` — alias, for example `ekip-release`.
 - `EKIP_SIGNING_KEY_PASSWORD` — private-key password (use the same value as the store password if keytool asks you to).

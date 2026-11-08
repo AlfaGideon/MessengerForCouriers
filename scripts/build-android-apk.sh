@@ -84,7 +84,9 @@ else
   SIGNING_MODE="temporary"
   echo "WARNING: No persistent signing secrets found; this APK cannot be updated in place by a later differently-signed APK." >&2
 fi
-"$BUILD_TOOLS/apksigner" sign --ks "$SIGNING_STORE" --ks-key-alias "$SIGNING_ALIAS" \
+STORE_MAGIC="$(od -An -tx1 -N4 "$SIGNING_STORE" | tr -d ' \n')"
+if [[ "$STORE_MAGIC" == "feedfeed" ]]; then SIGNING_STORE_TYPE="JKS"; else SIGNING_STORE_TYPE="PKCS12"; fi
+"$BUILD_TOOLS/apksigner" sign --ks "$SIGNING_STORE" --ks-type "$SIGNING_STORE_TYPE" --ks-key-alias "$SIGNING_ALIAS" \
   --ks-pass "pass:$SIGNING_STORE_PASSWORD" --key-pass "pass:$SIGNING_KEY_PASSWORD" --out "$OUTPUT" "$BUILD/aligned.apk"
 "$BUILD_TOOLS/apksigner" verify --verbose "$OUTPUT"
 echo "APK created ($SIGNING_MODE signing): $OUTPUT"
