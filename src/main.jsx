@@ -146,7 +146,7 @@ function App() {
     notify('Вы вышли из комнаты');
   };
 
-  return <div className={`app-shell ${settings.darkMode ? 'dark-mode' : ''}`}>
+  return <div className={`app-shell ${settings.darkMode ? 'dark-mode' : ''} ${page === 'feed' ? 'feed-screen' : ''}`}>
     <aside className="sidebar">
       <button className="brand-lockup" onClick={() => navigate('feed')} aria-label="Экип, на главную">
         <Logo /><span className="brand-name">экип<span className="brand-dot">.</span><small>СВОИ НА МАРШРУТЕ</small></span>
@@ -205,6 +205,21 @@ function SavedVideoPlayer({ video }) {
   const [muted, setMuted] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  useEffect(() => {
+    const element = player.current;
+    if (!element || !window.matchMedia('(max-width: 760px)').matches || !('IntersectionObserver' in window)) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.72) {
+        element.muted = true;
+        setMuted(true);
+        element.play().catch(() => {});
+      } else {
+        element.pause();
+      }
+    }, { threshold: [0, 0.72, 1] });
+    observer.observe(element);
+    return () => { observer.disconnect(); element.pause(); };
+  }, [video.url]);
   const togglePlayback = () => {
     const element = player.current;
     if (!element) return;
@@ -240,7 +255,7 @@ function FeedPage({ videos, videosLoading, onDeleteVideo, setShowUpload }) {
       <div className="welcome-row"><div><div className="eyebrow"><span className="welcome-dot"/> ЭКИП · МОЯ МЕДИАТЕКА</div><h1>Мои видео</h1><p>Добавьте ролик с телефона — он останется на устройстве.</p></div><button className="button-primary create-video" onClick={() => setShowUpload(true)}><Plus size={17}/> Добавить видео</button></div>
       <div className="route-status-strip"><span className="route-status-icon"><HardDrive size={16}/></span><span className="route-status-copy"><b>Локальное хранение</b><small><i/> Видео сохраняются в памяти приложения</small></span><span className="local-only-badge">ТОЛЬКО ВАМ</span></div>
       <div className="feed-filter-row"><div className="feed-tabs"><button className="selected">Медиатека <span className="video-count">{videos.length}</span></button></div><span className="local-feed-hint"><HardDrive size={13}/> Без облачной публикации</span></div>
-      {videosLoading ? <div className="empty-feed loading-feed"><div className="storage-spinner"/><b>Проверяю сохранённые видео…</b></div> : videos.length === 0 ? <section className="empty-feed"><div className="empty-feed-art"><div className="empty-feed-orbit orbit-one"/><div className="empty-feed-orbit orbit-two"/><div className="empty-feed-icon"><FileVideo size={31}/></div></div><div className="eyebrow">ВАША МЕДИАТЕКА</div><h2>Здесь пока пусто</h2><p>Выберите видео из галереи телефона. Оно будет сохранено в приложении и останется доступно после перезапуска.</p><button className="button-primary empty-upload-button" onClick={() => setShowUpload(true)}><Video size={17}/> Выбрать видео</button><div className="local-privacy-note"><ShieldCheck size={15}/> Файл хранится только на этом устройстве</div></section> : <div className="saved-video-list">{videos.map(video => <article className="saved-video-card" key={video.id}><SavedVideoPlayer video={video}/><div className="saved-video-copy"><div className="saved-video-meta"><span className="saved-video-badge"><HardDrive size={12}/> МОЯ МЕДИАТЕКА</span><button className="saved-video-delete" aria-label="Удалить видео" onClick={() => { if (window.confirm('Удалить видео с этого устройства?')) onDeleteVideo(video); }}><Trash2 size={16}/></button></div><h2>{video.caption || video.name}</h2><p>{formatBytes(video.size)} · {new Date(video.createdAt).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })}</p></div></article>)}</div>}
+      {videosLoading ? <div className="empty-feed loading-feed"><div className="storage-spinner"/><b>Проверяю сохранённые видео…</b></div> : videos.length === 0 ? <section className="empty-feed"><div className="empty-feed-art"><div className="empty-feed-orbit orbit-one"/><div className="empty-feed-orbit orbit-two"/><div className="empty-feed-icon"><FileVideo size={31}/></div></div><div className="eyebrow">ВАША МЕДИАТЕКА</div><h2>Здесь пока пусто</h2><p>Выберите видео из галереи телефона. Оно будет сохранено в приложении и останется доступно после перезапуска.</p><button className="button-primary empty-upload-button" onClick={() => setShowUpload(true)}><Video size={17}/> Выбрать видео</button><div className="local-privacy-note"><ShieldCheck size={15}/> Файл хранится только на этом устройстве</div></section> : <div className="saved-video-list shorts-feed">{videos.map(video => <article className="saved-video-card shorts-card" key={video.id}><SavedVideoPlayer video={video}/><div className="saved-video-copy"><div className="saved-video-meta"><span className="saved-video-badge"><HardDrive size={12}/> МОЯ МЕДИАТЕКА</span><button className="saved-video-delete" aria-label="Удалить видео" onClick={() => { if (window.confirm('Удалить видео с этого устройства?')) onDeleteVideo(video); }}><Trash2 size={16}/></button></div><h2>{video.caption || video.name}</h2><p>{formatBytes(video.size)} · {new Date(video.createdAt).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })}</p></div></article>)}</div>}
     </div>
   </div>;
 }
