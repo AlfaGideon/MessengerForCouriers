@@ -835,13 +835,34 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout.LayoutParams localParams = new LinearLayout.LayoutParams(-1, -2);
         localParams.topMargin = dp(5);
         identity.addView(local, localParams);
+        LinearLayout workRow = new LinearLayout(this);
+        workRow.setGravity(Gravity.CENTER_VERTICAL);
+        int serviceLogo = courierServiceLogo(courierService);
+        if (!courierService.isEmpty()) {
+            if (serviceLogo != 0) {
+                ImageView logo = new ImageView(this);
+                logo.setImageResource(serviceLogo);
+                logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                logo.setContentDescription("Логотип " + courierService);
+                workRow.addView(logo, new LinearLayout.LayoutParams(dp(24), dp(24)));
+            } else {
+                FrameLayout genericLogo = new FrameLayout(this);
+                genericLogo.setBackground(round(SURFACE_2, 6));
+                genericLogo.addView(new IconView(this, "delivery", ACCENT, dp(17)), centered());
+                genericLogo.setContentDescription("Значок курьерской службы");
+                workRow.addView(genericLogo, new LinearLayout.LayoutParams(dp(24), dp(24)));
+            }
+        }
         TextView workService = text(courierService.isEmpty() ? "Курьерская служба не указана" : "Работает · " + courierService,
                 10, courierService.isEmpty() ? MUTED : ACCENT, true);
         workService.setMaxLines(1);
         workService.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams workTextParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        workTextParams.leftMargin = courierService.isEmpty() ? 0 : dp(5);
+        workRow.addView(workService, workTextParams);
         LinearLayout.LayoutParams workServiceParams = new LinearLayout.LayoutParams(-1, -2);
         workServiceParams.topMargin = dp(4);
-        identity.addView(workService, workServiceParams);
+        identity.addView(workRow, workServiceParams);
         preview.addView(identity, new LinearLayout.LayoutParams(0, -2, 1f));
         if (!profileTelegram.isEmpty()) {
             FrameLayout telegram = new FrameLayout(this);
@@ -959,8 +980,6 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         String[] labels = {"Не указано", "Яндекс Еда", "Магнит Доставка", "Купер", "Яндекс Доставка", "Самокат", "Достависта", "Ozon", "Wildberries", "Другая служба"};
         String[] values = {"", "Яндекс Еда", "Магнит Доставка", "Купер", "Яндекс Доставка", "Самокат", "Достависта", "Ozon", "Wildberries", ""};
-        String[] marks = {"—", "Я", "М", "К", "Я", "С", "Д", "O", "W", "+"};
-        int[] colors = {0xFF55534E, 0xFFFFCC00, 0xFFE53A35, 0xFF42A36B, 0xFFFFCC00, 0xFFFF5A80, 0xFFFF7A32, 0xFF005BFF, 0xFFCB11AB, 0xFF514F49};
         ArrayList<LinearLayout> choices = new ArrayList<>();
         ArrayList<TextView> choiceLabels = new ArrayList<>();
         LinearLayout grid = new LinearLayout(this);
@@ -991,10 +1010,22 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             LinearLayout chip = new LinearLayout(this);
             chip.setGravity(Gravity.CENTER_VERTICAL);
             chip.setPadding(dp(6), dp(5), dp(6), dp(5));
-            TextView mark = text(marks[i], 13, (colors[i] == 0xFFFFCC00 ? INK : Color.WHITE), true);
-            mark.setGravity(Gravity.CENTER);
-            mark.setBackground(round(colors[i], 9));
-            chip.addView(mark, new LinearLayout.LayoutParams(dp(30), dp(30)));
+            int logoResource = courierServiceLogo(values[i]);
+            if (logoResource != 0) {
+                ImageView logo = new ImageView(this);
+                logo.setImageResource(logoResource);
+                logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                logo.setBackground(round(SURFACE, 8));
+                logo.setClipToOutline(true);
+                logo.setContentDescription("Логотип " + labels[i]);
+                chip.addView(logo, new LinearLayout.LayoutParams(dp(34), dp(34)));
+            } else {
+                FrameLayout logoBox = new FrameLayout(this);
+                logoBox.setBackground(round(SURFACE, 8));
+                String iconName = choiceIndex == 0 ? "delivery" : choiceIndex == labels.length - 1 ? "add" : "delivery";
+                logoBox.addView(new IconView(this, iconName, MUTED, dp(20)), centered());
+                chip.addView(logoBox, new LinearLayout.LayoutParams(dp(34), dp(34)));
+            }
             TextView name = text(labels[i], 11, Color.WHITE, true);
             name.setMaxLines(2);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1021,6 +1052,18 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             lastRow.addView(new View(this), new LinearLayout.LayoutParams(0, dp(48), 1f));
         }
         refreshSelection.run();
+    }
+
+    private int courierServiceLogo(String value) {
+        if ("Яндекс Еда".equals(value)) return R.drawable.logo_yandex_eda;
+        if ("Магнит Доставка".equals(value)) return R.drawable.logo_magnit_delivery;
+        if ("Купер".equals(value)) return R.drawable.logo_kuper;
+        if ("Яндекс Доставка".equals(value)) return R.drawable.logo_yandex_pro;
+        if ("Самокат".equals(value)) return R.drawable.logo_samokat;
+        if ("Достависта".equals(value)) return R.drawable.logo_dostavista;
+        if ("Ozon".equals(value)) return R.drawable.logo_ozon;
+        if ("Wildberries".equals(value)) return R.drawable.logo_wildberries;
+        return 0;
     }
 
     private boolean isPopularCourierService(String value) {
@@ -2885,6 +2928,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                     paint.setStyle(Paint.Style.FILL); canvas.drawRoundRect(new RectF(6, 4, 10, 20), 1, 1, paint); canvas.drawRoundRect(new RectF(14, 4, 18, 20), 1, 1, paint); break;
                 case "sound":
                     path.moveTo(3, 9); path.lineTo(7, 9); path.lineTo(12, 5); path.lineTo(12, 19); path.lineTo(7, 15); path.lineTo(3, 15); path.close(); canvas.drawPath(path, paint); canvas.drawArc(new RectF(11, 6, 21, 18), -55, 110, false, paint); break;
+                case "delivery":
+                    canvas.drawRoundRect(new RectF(3, 5, 21, 21), 3, 3, paint);
+                    path.moveTo(3, 10); path.lineTo(21, 10); path.moveTo(12, 10); path.lineTo(12, 21);
+                    canvas.drawPath(path, paint);
+                    break;
                 case "chatline":
                     canvas.drawRoundRect(new RectF(3, 4, 21, 19), 5, 5, paint); path.moveTo(7, 19); path.lineTo(5, 22); path.lineTo(12, 19); canvas.drawPath(path, paint); break;
                 case "telegram":
