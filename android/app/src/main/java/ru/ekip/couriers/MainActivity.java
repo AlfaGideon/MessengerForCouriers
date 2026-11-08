@@ -191,6 +191,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private String profileBio = "";
     private String profileTelegram = "";
     private String profileAvatarPath = "";
+    private String courierService = "";
     private String cityId = "city:санкт-петербург";
     private String customCityName = "";
     private Dialog updateProgressDialog;
@@ -227,6 +228,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         profileBio = prefs.getString("profile_bio", "");
         profileTelegram = prefs.getString("profile_telegram", "");
         profileAvatarPath = prefs.getString("profile_avatar_path", "");
+        courierService = prefs.getString("courier_service", "");
         if (!profileAvatarPath.isEmpty() && !new File(profileAvatarPath).isFile()) profileAvatarPath = "";
         String saved = prefs.getString("videos", "[]");
         try {
@@ -387,6 +389,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         else if ("chats".equals(activeTab)) renderEmptyPage("Чаты", "Сообщения появятся после подключения сервера.", "chat");
         else if ("profile".equals(activeTab)) renderProfile();
         else renderSettings();
+        refreshPictureInPictureEligibility();
     }
 
     private void renderFeed() {
@@ -832,6 +835,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout.LayoutParams localParams = new LinearLayout.LayoutParams(-1, -2);
         localParams.topMargin = dp(5);
         identity.addView(local, localParams);
+        TextView workService = text(courierService.isEmpty() ? "Курьерская служба не указана" : "Работает · " + courierService,
+                10, courierService.isEmpty() ? MUTED : ACCENT, true);
+        workService.setMaxLines(1);
+        workService.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams workServiceParams = new LinearLayout.LayoutParams(-1, -2);
+        workServiceParams.topMargin = dp(4);
+        identity.addView(workService, workServiceParams);
         preview.addView(identity, new LinearLayout.LayoutParams(0, -2, 1f));
         if (!profileTelegram.isEmpty()) {
             FrameLayout telegram = new FrameLayout(this);
@@ -861,6 +871,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             removeAvatar.setOnClickListener(view -> clearProfileAvatar());
         }
         editor.addView(avatarActions);
+
+        String[] selectedCourierService = {courierService};
+        addInlineLabel(editor, "КУРЬЕРСКАЯ СЛУЖБА");
+        addCourierServiceSelector(editor, selectedCourierService);
 
         addInlineLabel(editor, "НИКНЕЙМ");
         EditText nickname = profileInput("Например, КурьерПитер", profileName, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
@@ -919,10 +933,12 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             profileName = newName;
             profileBio = bio.getText().toString().trim();
             profileTelegram = newTelegram;
+            courierService = selectedCourierService[0] == null ? "" : selectedCourierService[0].trim();
             getSharedPreferences("ekip_native", MODE_PRIVATE).edit()
                     .putString("profile_name", profileName)
                     .putString("profile_bio", profileBio)
                     .putString("profile_telegram", profileTelegram)
+                    .putString("courier_service", courierService)
                     .apply();
             Toast.makeText(this, "Профиль сохранён", Toast.LENGTH_SHORT).show();
             renderPage();
@@ -933,6 +949,100 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         page.addView(editor, editorParams);
         scroll.addView(page, new ScrollView.LayoutParams(-1, -2));
         contentFrame.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void addCourierServiceSelector(LinearLayout parent, String[] selectedService) {
+        TextView hint = text("Выберите службу доставки", 11, MUTED, false);
+        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2);
+        hintParams.topMargin = dp(5);
+        parent.addView(hint, hintParams);
+
+        String[] labels = {"Не указано", "Яндекс Еда", "Магнит Доставка", "Купер", "Яндекс Доставка", "Самокат", "Достависта", "Ozon", "Wildberries", "Другая служба"};
+        String[] values = {"", "Яндекс Еда", "Магнит Доставка", "Купер", "Яндекс Доставка", "Самокат", "Достависта", "Ozon", "Wildberries", ""};
+        String[] marks = {"—", "Я", "М", "К", "Я", "С", "Д", "O", "W", "+"};
+        int[] colors = {0xFF55534E, 0xFFFFCC00, 0xFFE53A35, 0xFF42A36B, 0xFFFFCC00, 0xFFFF5A80, 0xFFFF7A32, 0xFF005BFF, 0xFFCB11AB, 0xFF514F49};
+        ArrayList<LinearLayout> choices = new ArrayList<>();
+        ArrayList<TextView> choiceLabels = new ArrayList<>();
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams gridParams = new LinearLayout.LayoutParams(-1, -2);
+        gridParams.topMargin = dp(4);
+        parent.addView(grid, gridParams);
+
+        Runnable refreshSelection = () -> {
+            boolean custom = !selectedService[0].isEmpty() && !isPopularCourierService(selectedService[0]);
+            for (int i = 0; i < choices.size(); i++) {
+                boolean selected = i == labels.length - 1 ? custom : values[i].equals(selectedService[0]);
+                choices.get(i).setBackground(ripple(round(selected ? 0x33FFCF22 : SURFACE_2, 14)));
+                choiceLabels.get(i).setTextColor(selected ? ACCENT : Color.WHITE);
+            }
+        };
+
+        for (int i = 0; i < labels.length; i++) {
+            if (i % 2 == 0) {
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+                if (i > 0) rowParams.topMargin = dp(6);
+                grid.addView(row, rowParams);
+            }
+            LinearLayout row = (LinearLayout) grid.getChildAt(grid.getChildCount() - 1);
+            final int choiceIndex = i;
+            LinearLayout chip = new LinearLayout(this);
+            chip.setGravity(Gravity.CENTER_VERTICAL);
+            chip.setPadding(dp(6), dp(5), dp(6), dp(5));
+            TextView mark = text(marks[i], 13, (colors[i] == 0xFFFFCC00 ? INK : Color.WHITE), true);
+            mark.setGravity(Gravity.CENTER);
+            mark.setBackground(round(colors[i], 9));
+            chip.addView(mark, new LinearLayout.LayoutParams(dp(30), dp(30)));
+            TextView name = text(labels[i], 11, Color.WHITE, true);
+            name.setMaxLines(2);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1f);
+            nameParams.leftMargin = dp(6);
+            chip.addView(name, nameParams);
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+            chipParams.leftMargin = dp(3);
+            chipParams.rightMargin = dp(3);
+            row.addView(chip, chipParams);
+            choices.add(chip);
+            choiceLabels.add(name);
+            chip.setOnClickListener(view -> {
+                if (choiceIndex == labels.length - 1) {
+                    showCustomCourierServiceDialog(selectedService, refreshSelection);
+                } else {
+                    selectedService[0] = values[choiceIndex];
+                    refreshSelection.run();
+                }
+            });
+        }
+        if (labels.length % 2 != 0) {
+            LinearLayout lastRow = (LinearLayout) grid.getChildAt(grid.getChildCount() - 1);
+            lastRow.addView(new View(this), new LinearLayout.LayoutParams(0, dp(48), 1f));
+        }
+        refreshSelection.run();
+    }
+
+    private boolean isPopularCourierService(String value) {
+        return "Яндекс Еда".equals(value) || "Магнит Доставка".equals(value) || "Купер".equals(value)
+                || "Яндекс Доставка".equals(value) || "Самокат".equals(value) || "Достависта".equals(value)
+                || "Ozon".equals(value) || "Wildberries".equals(value);
+    }
+
+    private void showCustomCourierServiceDialog(String[] selectedService, Runnable onSaved) {
+        String initialValue = isPopularCourierService(selectedService[0]) ? "" : selectedService[0];
+        EditText input = profileInput("Название службы", initialValue, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(40)});
+        new AlertDialog.Builder(this)
+                .setTitle("Ваша курьерская служба")
+                .setView(input)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Готово", (dialog, which) -> {
+                    String value = input.getText().toString().trim();
+                    if (!value.isEmpty()) selectedService[0] = value;
+                    onSaved.run();
+                })
+                .show();
     }
 
     private void addInlineLabel(LinearLayout parent, String value) {
@@ -2272,7 +2382,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 handler.post(updateProgress);
             }
         } catch (Exception ignored) { }
-        refreshPictureInPictureActions();
+        refreshPictureInPictureEligibility();
     }
 
     private void preparePlayer(SurfaceTexture surfaceTexture) {
@@ -2299,7 +2409,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                     playOverlay.setText("▶");
                     playOverlay.setVisibility(View.VISIBLE);
                 }
-                refreshPictureInPictureActions();
+                refreshPictureInPictureEligibility();
                 animatePendingVideoTransition();
             });
             player.setOnVideoSizeChangedListener((mediaPlayer, width, height) -> {
@@ -2844,7 +2954,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         }
         PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
                 .setAspectRatio(new Rational(Math.max(1, Math.round(ratio * 1000)), 1000));
-        if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(true);
+        if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(shouldEnterPictureInPicture());
         if ("feed".equals(activeTab) && player != null) {
             boolean playing = player.isPlaying();
             Intent actionIntent = new Intent(ACTION_PIP_PLAY_PAUSE).setPackage(getPackageName());
@@ -2863,6 +2973,12 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             builder.setActions(Collections.singletonList(micToggle));
         }
         return builder.build();
+    }
+
+    private void refreshPictureInPictureEligibility() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            try { setPictureInPictureParams(pictureInPictureParams()); } catch (Exception ignored) { }
+        }
     }
 
     private void refreshPictureInPictureActions() {
@@ -2930,6 +3046,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             setPictureInPictureRoomUi(isInPictureInPictureMode);
             if (isInPictureInPictureMode) refreshPictureInPictureActions();
         }
+        refreshPictureInPictureEligibility();
     }
 
     @Override protected void onResume() {
