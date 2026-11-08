@@ -21,12 +21,13 @@ import android.graphics.SurfaceTexture;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
+import android.media.AudioTrack;
 import android.media.MediaPlayer;
 import android.media.MediaRecorder;
-import android.media.ToneGenerator;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -131,7 +132,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private final AtomicBoolean microphoneCaptureRunning = new AtomicBoolean(false);
     private boolean microphoneEnabled = false;
     private boolean microphoneWasStoppedForPause = false;
-    private VoiceWaveView voiceWaveView;
+    private VoiceArenaView voiceArenaView;
+    private AudioTrack feedbackAudioTrack;
+    private final Runnable releaseFeedbackAudioTrack = () -> {
+        if (feedbackAudioTrack != null) {
+            try { feedbackAudioTrack.stop(); } catch (Exception ignored) { }
+            try { feedbackAudioTrack.release(); } catch (Exception ignored) { }
+            feedbackAudioTrack = null;
+        }
+    };
     private TextView playOverlay;
     private TextView videoTime;
     private SeekBar seekBar;
@@ -316,8 +325,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void renderPage() {
-        if (voiceWaveView != null) voiceWaveView.setActive(false);
-        voiceWaveView = null;
+        if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
+        voiceArenaView = null;
         releasePlayer();
         if (contentFrame == null) return;
         contentFrame.removeAllViews();
@@ -700,17 +709,19 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         stage.setOrientation(LinearLayout.VERTICAL);
         stage.setGravity(Gravity.CENTER);
         stage.setBackground(round(SURFACE, 26));
-        stage.setPadding(dp(18), dp(20), dp(18), dp(20));
+        stage.setPadding(dp(12), dp(12), dp(12), dp(12));
         LinearLayout.LayoutParams stageParams = new LinearLayout.LayoutParams(-1, 0, 1f);
         stageParams.bottomMargin = dp(14);
         page.addView(stage, stageParams);
-        FrameLayout voiceVisual = new FrameLayout(this);
-        voiceWaveView = new VoiceWaveView(this);
-        voiceWaveView.setActive(microphoneEnabled);
-        voiceVisual.addView(voiceWaveView, centered());
-        FrameLayout avatar = createAvatarView(dp(104));
-        voiceVisual.addView(avatar, new FrameLayout.LayoutParams(dp(104), dp(104), Gravity.CENTER));
-        stage.addView(voiceVisual, new LinearLayout.LayoutParams(dp(190), dp(190)));
+        voiceArenaView = new VoiceArenaView(this);
+        stage.addView(voiceArenaView, new LinearLayout.LayoutParams(dp(210), dp(210)));
+        TextView arenaHint = text("ДЕМО-АРЕНА · ПОТЯНИ КРУЖОЧКИ", 9, ACCENT, true);
+        arenaHint.setLetterSpacing(.08f);
+        arenaHint.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams arenaHintParams = new LinearLayout.LayoutParams(-1, -2);
+        arenaHintParams.topMargin = dp(-2);
+        arenaHintParams.bottomMargin = dp(3);
+        stage.addView(arenaHint, arenaHintParams);
         TextView self = text(profileName.isEmpty() ? "Вы" : profileName, 19, Color.WHITE, true);
         LinearLayout.LayoutParams selfParams = new LinearLayout.LayoutParams(-2, -2);
         selfParams.topMargin = dp(18);
@@ -724,7 +735,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         waiting.setGravity(Gravity.CENTER);
         waiting.setLineSpacing(dp(4), 1f);
         LinearLayout.LayoutParams waitingParams = new LinearLayout.LayoutParams(-1, -2);
-        waitingParams.topMargin = dp(34);
+        waitingParams.topMargin = dp(18);
         stage.addView(waiting, waitingParams);
 
         LinearLayout controls = new LinearLayout(this);
@@ -1332,7 +1343,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             microphoneEnabled = false;
             stopMicrophoneCapture();
             playMicCue(false);
-            if (voiceWaveView != null) voiceWaveView.setActive(false);
+            if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
             renderPage();
             return;
         }
@@ -1375,6 +1386,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             Thread meter = new Thread(() -> {
                 short[] samples = new short[Math.max(1024, bufferBytes / 2)];
                 long lastUiUpdate = 0;
+                float noiseFloor = 180f;
+                int speechFrames = 0;
+                int quietFrames = 0;
+                boolean speechDetected = false;
                 try {
                     while (microphoneCaptureRunning.get()) {
                         int read = activeRecorder.read(samples, 0, samples.length);
@@ -1386,12 +1401,32 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                             sum += value * value;
                         }
                         float rms = (float) Math.sqrt(sum / read);
-                        float level = Math.min(1f, rms / 7000f);
+                        float startThreshold = Math.max(850f, noiseFloor * 2.6f);
+                        float stopThreshold = Math.max(520f, noiseFloor * 1.6f);
+                        if (!speechDetected) {
+                            if (rms >= startThreshold) speechFrames++;
+                            else {
+                                speechFrames = 0;
+                                noiseFloor = noiseFloor * .96f + Math.min(rms, 900f) * .04f;
+                            }
+                            if (speechFrames >= 2) {
+                                speechDetected = true;
+                                quietFrames = 0;
+                            }
+                        } else if (rms < stopThreshold) {
+                            if (++quietFrames >= 2) {
+                                speechDetected = false;
+                                speechFrames = 0;
+                            }
+                        } else quietFrames = 0;
+                        float level = speechDetected ? Math.min(1f, .18f + (rms - stopThreshold) / 6500f) : 0f;
                         long now = SystemClock.uptimeMillis();
                         if (now - lastUiUpdate >= 70) {
                             lastUiUpdate = now;
+                            final boolean speakingNow = speechDetected;
+                            final float levelNow = level;
                             handler.post(() -> {
-                                if (microphoneEnabled && microphoneRecorder == activeRecorder && voiceWaveView != null) voiceWaveView.setLevel(level);
+                                if (microphoneEnabled && microphoneRecorder == activeRecorder && voiceArenaView != null) voiceArenaView.setSpeechLevel(speakingNow, levelNow);
                             });
                         }
                     }
@@ -1407,7 +1442,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                         handler.post(() -> {
                             if (microphoneEnabled) {
                                 microphoneEnabled = false;
-                                if (voiceWaveView != null) voiceWaveView.setActive(false);
+                                if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
                                 Toast.makeText(MainActivity.this, "Микрофон остановлен системой", Toast.LENGTH_SHORT).show();
                                 renderPage();
                             }
@@ -1442,7 +1477,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         boolean wasInRoom = joinedRoomId != null;
         if (microphoneEnabled) microphoneEnabled = false;
         stopMicrophoneCapture();
-        if (voiceWaveView != null) voiceWaveView.setActive(false);
+        if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
         joinedRoomId = null;
         if (wasInRoom) playVoiceCue(false);
     }
@@ -1454,25 +1489,65 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void playVoiceCue(boolean connected) {
-        playTone(connected ? ToneGenerator.TONE_PROP_ACK : ToneGenerator.TONE_PROP_NACK);
+        playChime(connected ? new int[]{392, 494, 587, 784} : new int[]{784, 587, 440, 330}, 760);
     }
 
     private void playMicCue(boolean enabled) {
-        playTone(enabled ? ToneGenerator.TONE_PROP_BEEP2 : ToneGenerator.TONE_PROP_BEEP);
+        playChime(enabled ? new int[]{523, 659, 784} : new int[]{784, 587, 392}, 560);
     }
 
-    private void playTone(int toneType) {
-        ToneGenerator tone = null;
-        try {
-            tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 65);
-            if (!tone.startTone(toneType, 110)) {
-                tone.release();
-                return;
+    private void playChime(int[] notes, int durationMs) {
+        handler.removeCallbacks(releaseFeedbackAudioTrack);
+        releaseFeedbackAudioTrack.run();
+        int sampleRate = 22050;
+        int noteMs = durationMs / notes.length;
+        int gapMs = 18;
+        int noteSamples = sampleRate * noteMs / 1000;
+        int gapSamples = sampleRate * gapMs / 1000;
+        short[] pcm = new short[noteSamples * notes.length + gapSamples * (notes.length - 1)];
+        int offset = 0;
+        for (int note : notes) {
+            for (int i = 0; i < noteSamples; i++) {
+                float seconds = i / (float) sampleRate;
+                float attack = Math.min(1f, seconds / .022f);
+                float release = Math.min(1f, (noteSamples - i) / (sampleRate * .035f));
+                float envelope = attack * release * (.72f + .28f * (float) Math.exp(-seconds * 3.2f));
+                double phase = 2.0 * Math.PI * note * seconds;
+                double tone = Math.sin(phase) + .23 * Math.sin(phase * 2.0) + .08 * Math.sin(phase * 3.0);
+                pcm[offset++] = (short) (tone * envelope * 10500f);
             }
-            ToneGenerator finishedTone = tone;
-            handler.postDelayed(finishedTone::release, 160);
+            for (int i = 0; i < gapSamples && offset < pcm.length; i++) pcm[offset++] = 0;
+        }
+        AudioTrack track = null;
+        try {
+            AudioAttributes attributes = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build();
+            AudioFormat format = new AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build();
+            track = new AudioTrack.Builder()
+                    .setAudioAttributes(attributes)
+                    .setAudioFormat(format)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .setBufferSizeInBytes(pcm.length * 2)
+                    .build();
+            int written = 0;
+            while (written < pcm.length) {
+                int count = track.write(pcm, written, pcm.length - written);
+                if (count <= 0) throw new IllegalStateException("Audio cue could not be written");
+                written += count;
+            }
+            track.setVolume(.72f);
+            feedbackAudioTrack = track;
+            track.play();
+            handler.postDelayed(releaseFeedbackAudioTrack, durationMs + 100L);
         } catch (Exception ignored) {
-            if (tone != null) try { tone.release(); } catch (Exception ignoredAgain) { }
+            if (feedbackAudioTrack == track) feedbackAudioTrack = null;
+            if (track != null) try { track.release(); } catch (Exception ignoredAgain) { }
         }
     }
 
@@ -2219,52 +2294,258 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         return view;
     }
 
-    private class VoiceWaveView extends View {
-        private final Paint wavePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private boolean active;
-        private float level;
-        private long animationStarted = SystemClock.uptimeMillis();
+    private class VoiceArenaView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint photoPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final ArrayList<ArenaBubble> bubbles = new ArrayList<>();
+        private final float mainRadius = dp(37);
+        private Bitmap mainAvatar;
+        private boolean speaking;
+        private float voiceLevel;
+        private long speechAnimationStarted = SystemClock.uptimeMillis();
+        private long previousFrameTime;
+        private long lastTouchTime;
+        private float lastTouchX, lastTouchY;
+        private float dragVelocityX, dragVelocityY;
+        private ArenaBubble draggedBubble;
+        private boolean animating;
 
-        VoiceWaveView(Activity context) {
+        VoiceArenaView(Activity context) {
             super(context);
-            wavePaint.setStyle(Paint.Style.STROKE);
-            wavePaint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            if (!profileAvatarPath.isEmpty()) mainAvatar = decodeAvatar(profileAvatarPath, dp(78));
+            setContentDescription("Локальная игровая арена с аватарами. Перетаскивайте маленькие кружочки.");
         }
 
-        void setActive(boolean enabled) {
-            if (active != enabled) animationStarted = SystemClock.uptimeMillis();
-            active = enabled;
-            if (!enabled) level = 0f;
+        void setSpeechLevel(boolean voiceDetected, float value) {
+            if (!speaking && voiceDetected) speechAnimationStarted = SystemClock.uptimeMillis();
+            speaking = voiceDetected;
+            voiceLevel = speaking ? Math.max(0f, Math.min(1f, value)) : 0f;
             invalidate();
         }
 
-        void setLevel(float value) {
-            level = Math.max(0f, Math.min(1f, value));
-            invalidate();
+        @Override protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            animating = true;
+            previousFrameTime = SystemClock.uptimeMillis();
+            postInvalidateOnAnimation();
+        }
+
+        @Override protected void onDetachedFromWindow() {
+            animating = false;
+            draggedBubble = null;
+            super.onDetachedFromWindow();
+        }
+
+        @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+            super.onSizeChanged(width, height, oldWidth, oldHeight);
+            initBubbles(width / 2f, height / 2f);
+        }
+
+        private void initBubbles(float cx, float cy) {
+            bubbles.clear();
+            float radius = dp(16);
+            bubbles.add(new ArenaBubble(cx, cy - dp(60), radius, dp(42), dp(20), ACCENT_2));
+            bubbles.add(new ArenaBubble(cx + dp(59), cy + dp(36), radius, -dp(32), -dp(40), Color.rgb(216, 165, 68)));
+            bubbles.add(new ArenaBubble(cx - dp(59), cy + dp(36), radius, dp(18), -dp(47), Color.rgb(183, 151, 91)));
         }
 
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            float centerX = getWidth() / 2f;
-            float centerY = getHeight() / 2f;
-            float innerRadius = dp(58);
-            float outerRadius = Math.min(getWidth(), getHeight()) * .48f;
-            wavePaint.setColor(ACCENT);
-            if (active) {
-                float elapsed = (SystemClock.uptimeMillis() - animationStarted) / 1900f;
-                for (int i = 0; i < 3; i++) {
-                    float phase = (elapsed + i / 3f) % 1f;
-                    float radius = innerRadius + phase * (outerRadius - innerRadius) + level * dp(7);
-                    wavePaint.setStrokeWidth(dp(1.5f + level * 1.5f));
-                    wavePaint.setAlpha((int) (145 * (1f - phase) * (.35f + .65f * level)));
-                    canvas.drawCircle(centerX, centerY, radius, wavePaint);
-                }
-                postInvalidateDelayed(16);
-            } else {
-                wavePaint.setStrokeWidth(dp(1.5f));
-                wavePaint.setAlpha(62);
-                canvas.drawCircle(centerX, centerY, innerRadius, wavePaint);
+            float cx = getWidth() / 2f;
+            float cy = getHeight() / 2f;
+            if (bubbles.isEmpty()) initBubbles(cx, cy);
+            updatePhysics(cx, cy);
+            float boundaryRadius = Math.min(getWidth(), getHeight()) * .48f;
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(1));
+            paint.setColor(ACCENT);
+            paint.setAlpha(34);
+            canvas.drawCircle(cx, cy, boundaryRadius, paint);
+            paint.setAlpha(18);
+            canvas.drawCircle(cx, cy, boundaryRadius - dp(8), paint);
+
+            if (speaking) drawSpeechWaves(canvas, cx, cy, boundaryRadius);
+            drawMainAvatar(canvas, cx, cy);
+            for (ArenaBubble bubble : bubbles) drawGameBubble(canvas, bubble);
+
+            if (animating) postInvalidateOnAnimation();
+        }
+
+        private void drawSpeechWaves(Canvas canvas, float cx, float cy, float boundaryRadius) {
+            float inner = mainRadius + dp(5);
+            float maxRadius = Math.min(boundaryRadius - dp(4), inner + dp(49));
+            float elapsed = (SystemClock.uptimeMillis() - speechAnimationStarted) / 1450f;
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setColor(ACCENT);
+            for (int i = 0; i < 3; i++) {
+                float phase = (elapsed + i / 3f) % 1f;
+                paint.setStrokeWidth(dp(1.5f + voiceLevel * 1.8f));
+                paint.setAlpha((int) (165 * (1f - phase) * (.5f + .5f * voiceLevel)));
+                float radius = inner + phase * (maxRadius - inner) + voiceLevel * dp(5);
+                canvas.drawCircle(cx, cy, radius, paint);
             }
+        }
+
+        private void drawMainAvatar(Canvas canvas, float cx, float cy) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(SURFACE_2);
+            canvas.drawCircle(cx, cy, mainRadius, paint);
+            if (mainAvatar != null && !mainAvatar.isRecycled()) {
+                Path clip = new Path();
+                clip.addCircle(cx, cy, mainRadius - dp(2), Path.Direction.CW);
+                canvas.save();
+                canvas.clipPath(clip);
+                canvas.drawBitmap(mainAvatar, null, new RectF(cx - mainRadius, cy - mainRadius, cx + mainRadius, cy + mainRadius), photoPaint);
+                canvas.restore();
+            } else {
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(ACCENT);
+                paint.setTextSize(dp(29));
+                String initial = profileName.isEmpty() ? "К" : profileName.substring(0, 1).toUpperCase(Locale.getDefault());
+                canvas.drawText(initial, cx, cy + dp(10), paint);
+            }
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setColor(ACCENT);
+            paint.setAlpha(245);
+            paint.setStrokeWidth(dp(2.5f));
+            canvas.drawCircle(cx, cy, mainRadius, paint);
+        }
+
+        private void drawGameBubble(Canvas canvas, ArenaBubble bubble) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(bubble.color);
+            paint.setAlpha(235);
+            canvas.drawCircle(bubble.x, bubble.y, bubble.radius, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setColor(0xFFFFE6A0);
+            paint.setAlpha(190);
+            paint.setStrokeWidth(dp(1.5f));
+            canvas.drawCircle(bubble.x, bubble.y, bubble.radius, paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(INK);
+            canvas.drawCircle(bubble.x, bubble.y - bubble.radius * .18f, bubble.radius * .22f, paint);
+            canvas.drawRoundRect(new RectF(bubble.x - bubble.radius * .42f, bubble.y + bubble.radius * .08f,
+                    bubble.x + bubble.radius * .42f, bubble.y + bubble.radius * .58f), bubble.radius * .3f, bubble.radius * .3f, paint);
+        }
+
+        private void updatePhysics(float cx, float cy) {
+            long now = SystemClock.uptimeMillis();
+            float dt = previousFrameTime == 0 ? .016f : Math.min(.04f, Math.max(.001f, (now - previousFrameTime) / 1000f));
+            previousFrameTime = now;
+            float bound = Math.min(getWidth(), getHeight()) * .48f;
+            for (ArenaBubble bubble : bubbles) {
+                if (bubble == draggedBubble) continue;
+                bubble.x += bubble.vx * dt;
+                bubble.y += bubble.vy * dt;
+                float dx = bubble.x - cx, dy = bubble.y - cy;
+                float distance = (float) Math.sqrt(dx * dx + dy * dy);
+                float maxDistance = bound - bubble.radius;
+                if (distance > maxDistance && distance > 0) {
+                    float nx = dx / distance, ny = dy / distance;
+                    bubble.x = cx + nx * maxDistance;
+                    bubble.y = cy + ny * maxDistance;
+                    float velocityOutward = bubble.vx * nx + bubble.vy * ny;
+                    if (velocityOutward > 0) {
+                        bubble.vx -= 1.8f * velocityOutward * nx;
+                        bubble.vy -= 1.8f * velocityOutward * ny;
+                    }
+                }
+                bounceFromMain(bubble, cx, cy);
+            }
+            for (int i = 0; i < bubbles.size(); i++) {
+                for (int j = i + 1; j < bubbles.size(); j++) resolveBubbleCollision(bubbles.get(i), bubbles.get(j));
+            }
+        }
+
+        private void bounceFromMain(ArenaBubble bubble, float cx, float cy) {
+            float dx = bubble.x - cx, dy = bubble.y - cy;
+            float minDistance = bubble.radius + mainRadius;
+            float distance = (float) Math.sqrt(dx * dx + dy * dy);
+            if (distance >= minDistance) return;
+            if (distance < .001f) { dx = 1f; dy = 0f; distance = 1f; }
+            float nx = dx / distance, ny = dy / distance;
+            bubble.x = cx + nx * minDistance;
+            bubble.y = cy + ny * minDistance;
+            float velocityAlongNormal = bubble.vx * nx + bubble.vy * ny;
+            if (velocityAlongNormal < 0) {
+                bubble.vx -= 1.8f * velocityAlongNormal * nx;
+                bubble.vy -= 1.8f * velocityAlongNormal * ny;
+            }
+        }
+
+        private void resolveBubbleCollision(ArenaBubble first, ArenaBubble second) {
+            float dx = second.x - first.x, dy = second.y - first.y;
+            float minimum = first.radius + second.radius;
+            float distanceSquared = dx * dx + dy * dy;
+            if (distanceSquared >= minimum * minimum) return;
+            float distance = (float) Math.sqrt(Math.max(.001f, distanceSquared));
+            float nx = dx / distance, ny = dy / distance;
+            float overlap = (minimum - distance) / 2f;
+            first.x -= nx * overlap; first.y -= ny * overlap;
+            second.x += nx * overlap; second.y += ny * overlap;
+            float relative = (second.vx - first.vx) * nx + (second.vy - first.vy) * ny;
+            if (relative < 0) {
+                float impulse = -(1.72f * relative) / 2f;
+                first.vx -= impulse * nx; first.vy -= impulse * ny;
+                second.vx += impulse * nx; second.vy += impulse * ny;
+            }
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent event) {
+            float x = event.getX(), y = event.getY();
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    draggedBubble = null;
+                    float nearest = Float.MAX_VALUE;
+                    for (ArenaBubble bubble : bubbles) {
+                        float dx = x - bubble.x, dy = y - bubble.y;
+                        float distance = dx * dx + dy * dy;
+                        float hit = bubble.radius + dp(9);
+                        if (distance <= hit * hit && distance < nearest) { nearest = distance; draggedBubble = bubble; }
+                    }
+                    if (draggedBubble == null) return false;
+                    lastTouchX = x; lastTouchY = y; lastTouchTime = SystemClock.uptimeMillis();
+                    dragVelocityX = dragVelocityY = 0;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (draggedBubble == null) return false;
+                    long now = SystemClock.uptimeMillis();
+                    float seconds = Math.max(.01f, (now - lastTouchTime) / 1000f);
+                    float dx = x - lastTouchX, dy = y - lastTouchY;
+                    draggedBubble.x += dx; draggedBubble.y += dy;
+                    dragVelocityX = dx / seconds; dragVelocityY = dy / seconds;
+                    lastTouchX = x; lastTouchY = y; lastTouchTime = now;
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (draggedBubble == null) return false;
+                    draggedBubble.vx = Math.max(-dp(260), Math.min(dp(260), dragVelocityX * .75f));
+                    draggedBubble.vy = Math.max(-dp(260), Math.min(dp(260), dragVelocityY * .75f));
+                    draggedBubble = null;
+                    performClick();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    draggedBubble = null;
+                    return true;
+            }
+            return true;
+        }
+
+        @Override public boolean performClick() {
+            super.performClick();
+            return true;
+        }
+    }
+
+    private static class ArenaBubble {
+        float x, y, vx, vy, radius;
+        final int color;
+        ArenaBubble(float x, float y, float radius, float vx, float vy, int color) {
+            this.x = x; this.y = y; this.radius = radius; this.vx = vx; this.vy = vy; this.color = color;
         }
     }
 
@@ -2394,7 +2675,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             microphoneEnabled = false;
             stopMicrophoneCapture();
             microphoneWasStoppedForPause = true;
-            if (voiceWaveView != null) voiceWaveView.setActive(false);
+            if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
         }
         super.onPause();
     }
@@ -2402,7 +2683,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     @Override protected void onDestroy() {
         microphoneEnabled = false;
         stopMicrophoneCapture();
-        if (voiceWaveView != null) voiceWaveView.setActive(false);
+        if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
+        handler.removeCallbacks(releaseFeedbackAudioTrack);
+        releaseFeedbackAudioTrack.run();
         releasePlayer();
         ioExecutor.shutdownNow();
         super.onDestroy();
