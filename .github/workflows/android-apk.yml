@@ -16,6 +16,11 @@ permissions:
 jobs:
   build-native-apk:
     runs-on: ubuntu-latest
+    env:
+      EKIP_SIGNING_KEYSTORE_B64: ${{ secrets.EKIP_SIGNING_KEYSTORE_B64 }}
+      EKIP_SIGNING_STORE_PASSWORD: ${{ secrets.EKIP_SIGNING_STORE_PASSWORD }}
+      EKIP_SIGNING_KEY_ALIAS: ${{ secrets.EKIP_SIGNING_KEY_ALIAS }}
+      EKIP_SIGNING_KEY_PASSWORD: ${{ secrets.EKIP_SIGNING_KEY_PASSWORD }}
     steps:
       - name: Check out branch
         uses: actions/checkout@v7
@@ -56,10 +61,21 @@ jobs:
           mkdir -p release
           cp android/app/build/outputs/apk/debug/app-debug.apk release/ekip-debug.apk
           sha256sum release/ekip-debug.apk > release/ekip-debug.apk.sha256
+          apk_sha256="$(awk '{print $1}' release/ekip-debug.apk.sha256)"
+          if [[ -n "$EKIP_SIGNING_KEYSTORE_B64" ]]; then signing_persistent=true; else signing_persistent=false; fi
+          cat > release/update.json <<EOF
+          {
+            "versionCode": ${EKIP_APK_VERSION_CODE},
+            "versionName": "${EKIP_APK_VERSION_NAME}",
+            "apkUrl": "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/${GITHUB_REF_NAME}/release/ekip-debug.apk",
+            "sha256": "${apk_sha256}",
+            "persistentSigning": ${signing_persistent}
+          }
+          EOF
           rm -f release/web-update.zip release/ota.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f release/ekip-debug.apk release/ekip-debug.apk.sha256
+          git add -f release/ekip-debug.apk release/ekip-debug.apk.sha256 release/update.json
           git add -u release/
           git commit -m "Publish native Ekip APK"
           git push origin HEAD:${GITHUB_REF_NAME}

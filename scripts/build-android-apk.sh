@@ -23,6 +23,8 @@ cat > "$BUILD/AndroidManifest.xml" <<'MANIFEST'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="ru.ekip.couriers">
   <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="35" />
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
   <application android:allowBackup="false" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:label="@string/app_name" android:supportsRtl="true" android:theme="@style/AppTheme.NoActionBarLaunch" android:usesCleartextTraffic="false">
     <activity android:name="ru.ekip.couriers.MainActivity" android:exported="true" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density">
       <intent-filter>
@@ -30,6 +32,7 @@ cat > "$BUILD/AndroidManifest.xml" <<'MANIFEST'
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+    <receiver android:name="ru.ekip.couriers.InstallStatusReceiver" android:exported="false" />
   </application>
 </manifest>
 MANIFEST
@@ -47,9 +50,9 @@ MANIFEST
   -o "$BUILD/base.apk" \
   "$BUILD/resources.zip"
 
+mapfile -d '' JAVA_SOURCES < <(find "$ROOT/android/app/src/main/java/ru/ekip/couriers" -type f -name '*.java' -print0)
 javac -encoding UTF-8 -source 8 -target 8 -classpath "$ANDROID_JAR" -d "$BUILD/classes" \
-  "$ROOT/android/app/src/main/java/ru/ekip/couriers/MainActivity.java" \
-  "$BUILD/generated/ru/ekip/couriers/R.java"
+  "${JAVA_SOURCES[@]}" "$BUILD/generated/ru/ekip/couriers/R.java"
 mapfile -d '' CLASS_FILES < <(find "$BUILD/classes" -type f -name '*.class' -print0)
 "$BUILD_TOOLS/d8" --release --min-api 24 --lib "$ANDROID_JAR" --output "$BUILD/dex" "${CLASS_FILES[@]}"
 cp "$BUILD/dex/classes.dex" "$BUILD/classes.dex"
@@ -57,9 +60,31 @@ cp "$BUILD/dex/classes.dex" "$BUILD/classes.dex"
 (cd "$BUILD" && zip -q -0 base.apk classes.dex)
 mkdir -p "$(dirname "$OUTPUT")"
 "$BUILD_TOOLS/zipalign" -f -p 4 "$BUILD/base.apk" "$BUILD/aligned.apk"
-keytool -genkeypair -keystore "$BUILD/debug.keystore" -storepass android -alias androiddebugkey -keypass android \
-  -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" >/dev/null 2>&1
-"$BUILD_TOOLS/apksigner" sign --ks "$BUILD/debug.keystore" --ks-key-alias androiddebugkey \
-  --ks-pass pass:android --key-pass pass:android --out "$OUTPUT" "$BUILD/aligned.apk"
+if [[ -n "${EKIP_SIGNING_KEYSTORE_B64:-}" ]]; then
+  : "${EKIP_SIGNING_STORE_PASSWORD:?EKIP_SIGNING_STORE_PASSWORD is required with the signing keystore}"
+  : "${EKIP_SIGNING_KEY_ALIAS:?EKIP_SIGNING_KEY_ALIAS is required with the signing keystore}"
+  : "${EKIP_SIGNING_KEY_PASSWORD:?EKIP_SIGNING_KEY_PASSWORD is required with the signing keystore}"
+  printf '%s' "$EKIP_SIGNING_KEYSTORE_B64" | base64 --decode > "$BUILD/ekip-signing.keystore"
+  SIGNING_STORE="$BUILD/ekip-signing.keystore"
+  SIGNING_ALIAS="$EKIP_SIGNING_KEY_ALIAS"
+  SIGNING_STORE_PASSWORD="$EKIP_SIGNING_STORE_PASSWORD"
+  SIGNING_KEY_PASSWORD="$EKIP_SIGNING_KEY_PASSWORD"
+  SIGNING_MODE="persistent"
+else
+  if [[ -n "${EKIP_SIGNING_STORE_PASSWORD:-}${EKIP_SIGNING_KEY_ALIAS:-}${EKIP_SIGNING_KEY_PASSWORD:-}" ]]; then
+    echo "EKIP_SIGNING_KEYSTORE_B64 is required when any other signing secret is set" >&2
+    exit 1
+  fi
+  keytool -genkeypair -keystore "$BUILD/temporary.keystore" -storepass android -alias androiddebugkey -keypass android \
+    -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Temporary,O=Android,C=US" >/dev/null 2>&1
+  SIGNING_STORE="$BUILD/temporary.keystore"
+  SIGNING_ALIAS="androiddebugkey"
+  SIGNING_STORE_PASSWORD="android"
+  SIGNING_KEY_PASSWORD="android"
+  SIGNING_MODE="temporary"
+  echo "WARNING: No persistent signing secrets found; this APK cannot be updated in place by a later differently-signed APK." >&2
+fi
+"$BUILD_TOOLS/apksigner" sign --ks "$SIGNING_STORE" --ks-key-alias "$SIGNING_ALIAS" \
+  --ks-pass "pass:$SIGNING_STORE_PASSWORD" --key-pass "pass:$SIGNING_KEY_PASSWORD" --out "$OUTPUT" "$BUILD/aligned.apk"
 "$BUILD_TOOLS/apksigner" verify --verbose "$OUTPUT"
-echo "APK created: $OUTPUT"
+echo "APK created ($SIGNING_MODE signing): $OUTPUT"

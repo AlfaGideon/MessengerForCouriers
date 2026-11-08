@@ -4,7 +4,12 @@ android/local.properties
 android/**/build/
 *.apk
 *.aab
+*.jks
+*.keystore
+*.p12
 *.ap_
 *.dex
 *.class
+release/ekip-debug.apk.sha256
+release/update.json
 .DS_Store

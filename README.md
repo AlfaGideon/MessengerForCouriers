@@ -10,9 +10,28 @@ Use the single plus/empty-state action to open Android's system video picker. Th
 
 The APK contains a permanent directory with a common room and city rooms for Saint Petersburg, Moscow, Kazan, Yekaterinburg, and Novosibirsk. Joining opens a native room screen. Remote participants, microphone transport, speaker detection, clip sharing, and app-link routing require a deployed backend/signaling service; those are not implemented in this client-only prototype. The UI indicates this rather than simulating remote users.
 
-## Android updates
+## Android updates and permanent signing
 
-The GitHub workflow publishes a new debug APK and checksum. Android installs app-code updates through its package installer with user confirmation; an Android application cannot silently replace its own APK from an arbitrary download. The earlier web-bundle updater is no longer used by the native APK.
+The native Settings screen checks `release/update.json`, downloads the APK directly in-app, verifies its SHA-256, and hands it to Android's package installer. Android still requires the user to approve installation; silent self-installation is not permitted. The updater is enabled only when a persistent signing keystore is configured.
+
+In GitHub repository **Settings → Secrets and variables → Actions**, add these repository secrets:
+
+- `EKIP_SIGNING_KEYSTORE_B64` — one-line Base64 encoding of your private `.jks` file.
+- `EKIP_SIGNING_STORE_PASSWORD` — keystore password.
+- `EKIP_SIGNING_KEY_ALIAS` — alias, for example `ekip-release`.
+- `EKIP_SIGNING_KEY_PASSWORD` — private-key password (use the same value as the store password if keytool asks you to).
+
+Create a key locally with JDK `keytool` (Linux/macOS):
+
+```bash
+keytool -genkeypair -v -keystore ekip-release.jks -storetype JKS \
+  -alias ekip-release -keyalg RSA -keysize 3072 -validity 10000
+base64 -w0 ekip-release.jks
+```
+
+Copy the Base64 output straight into `EKIP_SIGNING_KEYSTORE_B64` and the passwords/alias into their matching secrets. On macOS, use `base64 < ekip-release.jks | tr -d '\n'` instead of `base64 -w0`. Store a backup of `ekip-release.jks` and its passwords offline. Never commit the keystore or send it in chat; losing it makes future in-place updates impossible. After saving all four secrets, run **Actions → Build native Android APK → Run workflow**. Future workflow builds use this same key and can update over the installed app without uninstalling; Android displays its normal install confirmation.
+
+The APK currently on devices was signed with a temporary CI key that was not retained. Because Android rejects updates signed by a different key, the first switch to your permanent key requires one uninstall/reinstall. Uninstalling erases app-private local video copies, so keep original videos elsewhere before this one-time migration. The agent cannot create repository Actions secrets through the connected GitHub integration in this session (GitHub returned HTTP 403); add them directly in repository settings.
 
 ## Build
 

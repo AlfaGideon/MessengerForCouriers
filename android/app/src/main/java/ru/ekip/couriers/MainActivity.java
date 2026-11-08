@@ -2,8 +2,11 @@ package ru.ekip.couriers;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageInstaller;
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -23,6 +26,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -43,9 +47,15 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -54,6 +64,9 @@ import java.util.concurrent.Executors;
 /** Native Android UI. The APK contains no WebView and renders every screen with Android Views. */
 public class MainActivity extends Activity implements TextureView.SurfaceTextureListener {
     private static final int PICK_VIDEO_REQUEST = 4102;
+    private static final int UPDATE_PERMISSION_REQUEST = 4103;
+    private static final String UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/update.json";
+    private static final String UPDATE_APK_PREFIX = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/ekip-debug.apk";
     private static final int INK = Color.rgb(20, 21, 25);
     private static final int SURFACE = Color.rgb(29, 30, 35);
     private static final int SURFACE_2 = Color.rgb(39, 40, 46);
@@ -433,7 +446,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         cardParams.topMargin = dp(18);
         cardParams.bottomMargin = dp(18);
         page.addView(card, cardParams);
-        contentFrame.addView(page);
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
     }
 
     private void renderRooms() {
@@ -450,7 +463,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         for (RoomItem room : rooms) list.addView(roomCard(room));
         scroll.addView(list);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-        contentFrame.addView(page);
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
     }
 
     private View roomCard(RoomItem room) {
@@ -556,7 +569,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout.LayoutParams noticeParams = new LinearLayout.LayoutParams(-1, -2);
         noticeParams.topMargin = dp(12);
         page.addView(notice, noticeParams);
-        contentFrame.addView(page);
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
     }
 
     private void renderProfile() {
@@ -601,7 +614,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
         cardParams.topMargin = dp(16);
         page.addView(card, cardParams);
-        contentFrame.addView(page);
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
     }
 
     private void renderSettings() {
@@ -609,47 +622,181 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         addPageHeader(page, "Ещё", "Настройки приложения");
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.TOP);
         card.setPadding(dp(16), dp(8), dp(16), dp(8));
         card.setBackground(round(SURFACE, 20));
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
         cardParams.topMargin = dp(18);
         page.addView(card, cardParams);
         addSettingRow(card, "Медиатека", "Видео хранятся на телефоне", "▣", view -> new AlertDialog.Builder(this).setTitle("Локальная медиатека").setMessage("Выбранные видео копируются в приватное хранилище приложения и не отправляются в сеть.").setPositiveButton("Понятно", null).show());
-        addSettingRow(card, "Обновить приложение", "Скачать актуальный APK", "↻", view -> {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/ekip-debug.apk"));
-            try { startActivity(intent); } catch (Exception ignored) { Toast.makeText(this, "Не удалось открыть ссылку на APK", Toast.LENGTH_SHORT).show(); }
-        });
+        addSettingRow(card, "Обновить приложение", "Проверить и установить новую версию", "↻", view -> checkForUpdates());
         addSettingRow(card, "О приложении", "Экип · Android", "ⓘ", view -> new AlertDialog.Builder(this).setTitle("Экип").setMessage("Нативное Android-приложение. Видео хранятся только на этом устройстве.").setPositiveButton("Понятно", null).show());
         TextView note = text("Android попросит подтвердить установку обновления. Голосовые звонки и публикация видео требуют сервера.", 12, MUTED, false);
         note.setLineSpacing(dp(3), 1f);
         LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(-1, -2);
         noteParams.topMargin = dp(18);
         page.addView(note, noteParams);
-        contentFrame.addView(page);
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
     }
 
     private void addSettingRow(LinearLayout parent, String title, String detail, String glyph, View.OnClickListener action) {
         LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(68));
         row.setPadding(0, dp(12), 0, dp(12));
         TextView icon = text(glyph, 21, YELLOW, true);
         icon.setGravity(Gravity.CENTER);
-        row.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        icon.setBackground(round(0x22FFD332, 12));
+        row.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        copy.setPadding(dp(10), 0, 0, 0);
-        copy.addView(text(title, 14, Color.WHITE, true));
-        TextView sub = text(detail, 11, MUTED, false);
+        copy.setGravity(Gravity.CENTER_VERTICAL);
+        copy.setPadding(dp(10), 0, dp(4), 0);
+        TextView titleView = text(title, 15, Color.WHITE, true);
+        copy.addView(titleView, new LinearLayout.LayoutParams(-1, -2));
+        TextView sub = text(detail, 12, MUTED, false);
         LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(-1, -2);
         subParams.topMargin = dp(3);
         copy.addView(sub, subParams);
         row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
-        row.addView(new IconView(this, "next", MUTED, dp(18)));
+        IconView arrow = new IconView(this, "next", MUTED, dp(18));
+        row.addView(arrow, new LinearLayout.LayoutParams(dp(24), dp(24)));
         row.setOnClickListener(action);
         parent.addView(row, new LinearLayout.LayoutParams(-1, -2));
         View divider = new View(this);
         divider.setBackgroundColor(0xFF36373D);
         parent.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
+    }
+
+    private void checkForUpdates() {
+        Toast.makeText(this, "Проверяем обновления…", Toast.LENGTH_SHORT).show();
+        ioExecutor.execute(() -> {
+            try {
+                JSONObject metadata = fetchJson(UPDATE_MANIFEST_URL + "?t=" + System.currentTimeMillis());
+                if (!metadata.optBoolean("persistentSigning", false)) {
+                    throw new IllegalStateException("Постоянная подпись ещё не настроена в GitHub Actions. Обновление через приложение станет доступно после настройки ключа.");
+                }
+                long latestCode = metadata.getLong("versionCode");
+                PackageInfo installed = getPackageManager().getPackageInfo(getPackageName(), 0);
+                long installedCode = Build.VERSION.SDK_INT >= 28 ? installed.getLongVersionCode() : installed.versionCode;
+                if (latestCode <= installedCode) {
+                    handler.post(() -> Toast.makeText(this, "У вас установлена последняя версия", Toast.LENGTH_SHORT).show());
+                    return;
+                }
+                String apkUrl = metadata.getString("apkUrl");
+                String expectedSha = metadata.getString("sha256").toLowerCase(Locale.ROOT);
+                if (!apkUrl.startsWith(UPDATE_APK_PREFIX) || !expectedSha.matches("[0-9a-f]{64}")) {
+                    throw new IllegalStateException("Некорректные данные обновления");
+                }
+                File apk = downloadUpdate(apkUrl, expectedSha);
+                String versionName = metadata.optString("versionName", "новая версия");
+                handler.post(() -> new AlertDialog.Builder(this)
+                        .setTitle("Доступно обновление")
+                        .setMessage("Экип " + versionName + " готов к установке. APK проверен по контрольной сумме. Android попросит подтвердить установку.")
+                        .setNegativeButton("Позже", null)
+                        .setPositiveButton("Установить", (dialog, which) -> requestUpdateInstallPermission(apk))
+                        .show());
+            } catch (Exception error) {
+                String message = error.getMessage() == null ? "Не удалось проверить обновление" : error.getMessage();
+                handler.post(() -> new AlertDialog.Builder(this)
+                        .setTitle("Обновление недоступно")
+                        .setMessage(message)
+                        .setPositiveButton("Понятно", null)
+                        .show());
+            }
+        });
+    }
+
+    private JSONObject fetchJson(String address) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
+        connection.setConnectTimeout(12000);
+        connection.setReadTimeout(12000);
+        connection.setUseCaches(false);
+        connection.setRequestProperty("Cache-Control", "no-cache");
+        try (InputStream input = connection.getInputStream(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                if (output.size() + count > 64 * 1024) throw new IllegalStateException("Слишком большой файл обновления");
+                output.write(buffer, 0, count);
+            }
+            return new JSONObject(new String(output.toByteArray(), java.nio.charset.StandardCharsets.UTF_8));
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private File downloadUpdate(String address, String expectedSha) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(30000);
+        connection.setUseCaches(false);
+        File apk = new File(getCacheDir(), "ekip-update.apk");
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(apk)) {
+            byte[] buffer = new byte[64 * 1024];
+            int count;
+            long total = 0;
+            while ((count = input.read(buffer)) != -1) {
+                total += count;
+                if (total > 100L * 1024L * 1024L) throw new IllegalStateException("Размер APK превышает допустимый лимит");
+                digest.update(buffer, 0, count);
+                output.write(buffer, 0, count);
+            }
+            output.getFD().sync();
+        } finally {
+            connection.disconnect();
+        }
+        StringBuilder actualSha = new StringBuilder();
+        for (byte value : digest.digest()) actualSha.append(String.format(Locale.ROOT, "%02x", value & 0xff));
+        if (!expectedSha.equals(actualSha.toString())) {
+            apk.delete();
+            throw new IllegalStateException("Контрольная сумма APK не совпала; установка отменена");
+        }
+        return apk;
+    }
+
+    private void requestUpdateInstallPermission(File apk) {
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            try {
+                Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName()));
+                startActivityForResult(settings, UPDATE_PERMISSION_REQUEST);
+            } catch (Exception error) {
+                Toast.makeText(this, "Разрешите установку APK для Экип в настройках Android", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+        installDownloadedUpdate(apk);
+    }
+
+    private void installDownloadedUpdate(File apk) {
+        if (apk == null || !apk.isFile()) {
+            Toast.makeText(this, "Файл обновления не найден. Проверьте обновление ещё раз.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            PackageInstaller installer = getPackageManager().getPackageInstaller();
+            PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+            params.setAppPackageName(getPackageName());
+            params.setSize(apk.length());
+            int sessionId = installer.createSession(params);
+            try (PackageInstaller.Session session = installer.openSession(sessionId);
+                 InputStream input = new FileInputStream(apk);
+                 OutputStream output = session.openWrite("base.apk", 0, apk.length())) {
+                byte[] buffer = new byte[64 * 1024];
+                int count;
+                while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                session.fsync(output);
+                Intent status = new Intent(this, InstallStatusReceiver.class).setAction("ru.ekip.couriers.UPDATE_INSTALL_STATUS");
+                PendingIntent callback = PendingIntent.getBroadcast(this, sessionId, status,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                session.commit(callback.getIntentSender());
+            }
+            Toast.makeText(this, "Передано установщику Android. Подтвердите обновление на экране.", Toast.LENGTH_LONG).show();
+        } catch (Exception error) {
+            Toast.makeText(this, "Не удалось запустить установку обновления", Toast.LENGTH_LONG).show();
+        }
     }
 
     private LinearLayout pageColumn() {
@@ -694,6 +841,14 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == UPDATE_PERMISSION_REQUEST) {
+            if (Build.VERSION.SDK_INT < 26 || getPackageManager().canRequestPackageInstalls()) {
+                installDownloadedUpdate(new File(getCacheDir(), "ekip-update.apk"));
+            } else {
+                Toast.makeText(this, "Без разрешения Android не сможет установить обновление", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode != PICK_VIDEO_REQUEST || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         String name = queryDisplayName(uri);
