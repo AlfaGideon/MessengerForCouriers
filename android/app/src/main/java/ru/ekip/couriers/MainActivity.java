@@ -56,6 +56,7 @@ import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.EditText;
@@ -95,6 +96,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private static final int PICK_AVATAR_REQUEST = 4105;
     private static final int MICROPHONE_PERMISSION_REQUEST = 4106;
     private static final String ACTION_PIP_PLAY_PAUSE = "ru.ekip.couriers.action.PIP_PLAY_PAUSE";
+    private static final String ACTION_PIP_MIC_TOGGLE = "ru.ekip.couriers.action.PIP_MIC_TOGGLE";
     private static final String UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/update.json";
     private static final String UPDATE_APK_PREFIX = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/ekip-debug.apk";
     private static final int INK = Color.rgb(14, 13, 11);
@@ -121,14 +123,24 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final BroadcastReceiver pictureInPictureActionReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
-            if (ACTION_PIP_PLAY_PAUSE.equals(intent.getAction()) && Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode()) {
-                togglePlayback();
-            }
+            if (Build.VERSION.SDK_INT < 26 || !isInPictureInPictureMode()) return;
+            if (ACTION_PIP_PLAY_PAUSE.equals(intent.getAction())) togglePlayback();
+            else if (ACTION_PIP_MIC_TOGGLE.equals(intent.getAction())) toggleMicrophone();
         }
     };
     private boolean pictureInPictureActionReceiverRegistered;
     private boolean enteringPictureInPicture;
     private View pipFeedTopBar, pipFeedGradientTop, pipFeedGradientBottom, pipFeedDetails, pipFeedSideControls, pipFeedPlaybackControls;
+    private View pipRoomHeader, pipRoomControls;
+    private LinearLayout pipRoomPage;
+    private LinearLayout.LayoutParams pipRoomStageParams;
+    private FrameLayout pipRoomMicButton;
+    private IconView pipRoomMicIcon;
+    private ImageView pendingVideoTransitionView;
+    private Bitmap pendingVideoTransitionBitmap;
+    private int pendingVideoTransitionDirection;
+    private boolean preservingVideoTransitionForRender;
+    private boolean videoTransitionRunning;
     private final ArrayList<VideoItem> videos = new ArrayList<>();
     private final ArrayList<RoomItem> rooms = new ArrayList<>();
     private final Runnable updateProgress = new Runnable() {
@@ -203,6 +215,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void registerPictureInPictureActionReceiver() {
         IntentFilter filter = new IntentFilter(ACTION_PIP_PLAY_PAUSE);
+        filter.addAction(ACTION_PIP_MIC_TOGGLE);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(pictureInPictureActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(pictureInPictureActionReceiver, filter);
         pictureInPictureActionReceiverRegistered = true;
@@ -356,6 +369,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void renderPage() {
+        if (!preservingVideoTransitionForRender) clearPendingVideoTransition();
+        pipRoomHeader = pipRoomControls = pipRoomPage = null;
+        pipRoomStageParams = null;
+        pipRoomMicButton = null;
+        pipRoomMicIcon = null;
         if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
         voiceArenaView = null;
         releasePlayer();
@@ -394,7 +412,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 if (e1 == null || e2 == null) return false;
                 float dy = e2.getY() - e1.getY();
                 if (Math.abs(dy) > dp(50) && Math.abs(velocityY) > dp(120)) {
-                    showVideoAt(currentVideoIndex + (dy < 0 ? 1 : -1));
+                    if (Build.VERSION.SDK_INT < 26 || !isInPictureInPictureMode()) {
+                        int direction = dy < 0 ? 1 : -1;
+                        showVideoAt(currentVideoIndex + direction, direction);
+                    }
                     return true;
                 }
                 return false;
@@ -405,6 +426,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         addFeedTopBar(feed);
         addFeedVideoDetails(feed);
         addFeedControls(feed);
+        if (pendingVideoTransitionBitmap != null) installPendingVideoTransition(feed);
         if (player == null) { playOverlay.setText("▶"); playOverlay.setVisibility(View.VISIBLE); }
     }
 
@@ -727,7 +749,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         RoomItem room = findRoom(joinedRoomId);
         if (room == null) { joinedRoomId = null; renderRooms(); return; }
         LinearLayout page = pageColumn();
+        pipRoomPage = page;
         LinearLayout header = new LinearLayout(this);
+        pipRoomHeader = header;
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(0, 0, 0, dp(14));
         TextView back = roundIconButton("back", SURFACE_2, Color.WHITE, 46);
@@ -750,11 +774,24 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         stage.setBackground(round(SURFACE, 26));
         LinearLayout.LayoutParams stageParams = new LinearLayout.LayoutParams(-1, 0, 1f);
         stageParams.bottomMargin = dp(14);
+        pipRoomStageParams = stageParams;
         page.addView(stage, stageParams);
         voiceArenaView = new VoiceArenaView(this);
         stage.addView(voiceArenaView, new FrameLayout.LayoutParams(-1, -1));
+        pipRoomMicButton = new FrameLayout(this);
+        pipRoomMicButton.setContentDescription(microphoneEnabled ? "Выключить микрофон" : "Включить микрофон");
+        pipRoomMicButton.setBackground(ripple(round(microphoneEnabled ? ACCENT : SURFACE_2, 28)));
+        pipRoomMicButton.setElevation(dp(5));
+        pipRoomMicButton.setVisibility(View.GONE);
+        pipRoomMicIcon = new IconView(this, microphoneEnabled ? "mic" : "mute", microphoneEnabled ? INK : ACCENT, dp(22));
+        pipRoomMicButton.addView(pipRoomMicIcon, centered());
+        pipRoomMicButton.setOnClickListener(view -> toggleMicrophone());
+        FrameLayout.LayoutParams pipMicParams = new FrameLayout.LayoutParams(dp(54), dp(54), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        pipMicParams.bottomMargin = dp(14);
+        stage.addView(pipRoomMicButton, pipMicParams);
 
         LinearLayout controls = new LinearLayout(this);
+        pipRoomControls = controls;
         controls.setGravity(Gravity.CENTER);
         TextView mic = pillButton(microphoneEnabled ? "Выключить микрофон" : hasMicrophonePermission() ? "Включить микрофон" : "Разрешить микрофон",
                 microphoneEnabled ? SURFACE_2 : ACCENT, microphoneEnabled ? Color.WHITE : INK, 12);
@@ -1355,13 +1392,20 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         }
     }
 
+    private boolean isInPictureInPicture() {
+        return Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode();
+    }
+
     private void toggleMicrophone() {
         if (microphoneEnabled) {
             microphoneEnabled = false;
             stopMicrophoneCapture();
             playMicCue(false);
             if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
-            renderPage();
+            if (isInPictureInPicture()) {
+                updatePictureInPictureMicButton();
+                refreshPictureInPictureActions();
+            } else renderPage();
             return;
         }
         if (!hasMicrophonePermission()) {
@@ -1374,7 +1418,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         }
         microphoneEnabled = true;
         playMicCue(true);
-        renderPage();
+        if (isInPictureInPicture()) {
+            updatePictureInPictureMicButton();
+            refreshPictureInPictureActions();
+        } else renderPage();
     }
 
     private boolean startMicrophoneCapture() {
@@ -1472,7 +1519,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                                 microphoneEnabled = false;
                                 if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
                                 Toast.makeText(MainActivity.this, "Микрофон остановлен системой", Toast.LENGTH_SHORT).show();
-                                renderPage();
+                                if (isInPictureInPicture()) {
+                                    updatePictureInPictureMicButton();
+                                    refreshPictureInPictureActions();
+                                } else renderPage();
                             }
                         });
                     }
@@ -2078,7 +2128,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         } else {
             Toast.makeText(this, "Без доступа к микрофону говорить в голосовой комнате нельзя", Toast.LENGTH_LONG).show();
         }
-        if ("rooms".equals(activeTab)) renderPage();
+        if ("rooms".equals(activeTab)) {
+            if (isInPictureInPicture()) updatePictureInPictureMicButton();
+            else renderPage();
+        }
     }
 
     private void showLoadingOverlay() {
@@ -2136,16 +2189,72 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 }).show();
     }
 
-    private void showVideoAt(int index) {
-        if (videos.isEmpty()) return;
+    private Bitmap captureCurrentFeedFrame() {
+        if (textureView == null || textureView.getWidth() <= 0 || textureView.getHeight() <= 0) return null;
+        try { return textureView.getBitmap(); } catch (Exception ignored) { return null; }
+    }
+
+    private void showVideoAt(int index, int direction) {
+        if (videos.isEmpty() || pendingVideoTransitionBitmap != null) return;
         int next = index;
         if (next < 0) next = videos.size() - 1;
         if (next >= videos.size()) next = 0;
         if (next == currentVideoIndex && player != null) return;
+        Bitmap outgoingFrame = captureCurrentFeedFrame();
         currentVideoIndex = next;
         userWantsPlayback = true;
         persistVideos();
+        if (outgoingFrame != null) {
+            pendingVideoTransitionBitmap = outgoingFrame;
+            pendingVideoTransitionDirection = direction;
+            preservingVideoTransitionForRender = true;
+        }
         renderPage();
+        preservingVideoTransitionForRender = false;
+        if (outgoingFrame != null && pendingVideoTransitionView == null) clearPendingVideoTransition();
+    }
+
+    private void installPendingVideoTransition(FrameLayout feed) {
+        if (pendingVideoTransitionBitmap == null) return;
+        ImageView outgoing = new ImageView(this);
+        outgoing.setImageBitmap(pendingVideoTransitionBitmap);
+        outgoing.setScaleType(ImageView.ScaleType.FIT_XY);
+        outgoing.setContentDescription("Переход к следующему видео");
+        feed.addView(outgoing, new FrameLayout.LayoutParams(-1, -1));
+        outgoing.bringToFront();
+        pendingVideoTransitionView = outgoing;
+    }
+
+    private void animatePendingVideoTransition() {
+        ImageView outgoing = pendingVideoTransitionView;
+        if (outgoing == null || videoTransitionRunning) return;
+        videoTransitionRunning = true;
+        outgoing.post(() -> {
+            if (pendingVideoTransitionView != outgoing) return;
+            int height = Math.max(outgoing.getHeight(), contentFrame == null ? 0 : contentFrame.getHeight());
+            if (height <= 0) height = dp(400);
+            outgoing.animate()
+                    .translationY(-pendingVideoTransitionDirection * height)
+                    .setDuration(320)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
+                    .withEndAction(this::clearPendingVideoTransition)
+                    .start();
+        });
+    }
+
+    private void clearPendingVideoTransition() {
+        ImageView outgoing = pendingVideoTransitionView;
+        pendingVideoTransitionView = null;
+        if (outgoing != null) {
+            outgoing.animate().cancel();
+            if (outgoing.getParent() instanceof ViewGroup) ((ViewGroup) outgoing.getParent()).removeView(outgoing);
+            outgoing.setImageDrawable(null);
+        }
+        Bitmap snapshot = pendingVideoTransitionBitmap;
+        pendingVideoTransitionBitmap = null;
+        if (snapshot != null && !snapshot.isRecycled()) snapshot.recycle();
+        pendingVideoTransitionDirection = 0;
+        videoTransitionRunning = false;
     }
 
     private void togglePlayback() {
@@ -2191,6 +2300,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                     playOverlay.setVisibility(View.VISIBLE);
                 }
                 refreshPictureInPictureActions();
+                animatePendingVideoTransition();
             });
             player.setOnVideoSizeChangedListener((mediaPlayer, width, height) -> {
                 videoWidth = width;
@@ -2201,17 +2311,24 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             player.setOnErrorListener((mediaPlayer, what, extra) -> {
                 if (playOverlay != null) { playOverlay.setText("!"); playOverlay.setVisibility(View.VISIBLE); }
                 Toast.makeText(this, "Не удалось воспроизвести этот формат видео", Toast.LENGTH_SHORT).show();
+                animatePendingVideoTransition();
                 return true;
             });
             player.prepareAsync();
         } catch (Exception error) {
             releasePlayer();
             Toast.makeText(this, "Не удалось открыть видео", Toast.LENGTH_SHORT).show();
+            animatePendingVideoTransition();
         }
     }
 
     private void applyVideoTransform() {
         if (textureView == null || videoWidth <= 0 || videoHeight <= 0) return;
+        if (isInPictureInPicture()) {
+            textureView.setTransform(new Matrix());
+            textureView.invalidate();
+            return;
+        }
         int viewWidth = textureView.getWidth();
         int viewHeight = textureView.getHeight();
         if (viewWidth <= 0 || viewHeight <= 0) return;
@@ -2340,6 +2457,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         private final float mainRadius = dp(37);
         private Bitmap mainAvatar;
         private boolean speaking;
+        private boolean compactPictureInPicture;
         private float voiceLevel;
         private long speechAnimationStarted = SystemClock.uptimeMillis();
         private long previousFrameTime;
@@ -2356,6 +2474,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             paint.setStrokeCap(Paint.Cap.ROUND);
             if (!profileAvatarPath.isEmpty()) mainAvatar = decodeAvatar(profileAvatarPath, dp(78));
             setContentDescription("Локальная игровая арена с аватарами. Перетаскивайте маленькие кружочки.");
+        }
+
+        void setCompactPictureInPicture(boolean compact) {
+            compactPictureInPicture = compact;
+            invalidate();
         }
 
         void setSpeechLevel(boolean voiceDetected, float value) {
@@ -2400,28 +2523,32 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             float cy = getHeight() / 2f;
             if (bubbles.isEmpty()) initBubbles(getWidth(), getHeight());
             updatePhysics(cx, cy);
-            float inset = dp(8);
-            RectF arenaBounds = new RectF(inset, inset, getWidth() - inset, getHeight() - inset);
             float boundaryRadius = Math.min(getWidth(), getHeight()) * .48f;
+            if (!compactPictureInPicture) {
+                float inset = dp(8);
+                RectF arenaBounds = new RectF(inset, inset, getWidth() - inset, getHeight() - inset);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(dp(1));
+                paint.setColor(ACCENT);
+                paint.setAlpha(34);
+                canvas.drawRoundRect(arenaBounds, dp(24), dp(24), paint);
+                arenaBounds.inset(dp(7), dp(7));
+                paint.setAlpha(18);
+                canvas.drawRoundRect(arenaBounds, dp(19), dp(19), paint);
+            }
 
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(1));
-            paint.setColor(ACCENT);
-            paint.setAlpha(34);
-            canvas.drawRoundRect(arenaBounds, dp(24), dp(24), paint);
-            arenaBounds.inset(dp(7), dp(7));
-            paint.setAlpha(18);
-            canvas.drawRoundRect(arenaBounds, dp(19), dp(19), paint);
-
-            if (speaking) drawSpeechWaves(canvas, cx, cy, boundaryRadius);
-            for (ArenaBubble bubble : bubbles) drawGameBubble(canvas, bubble);
-            drawMainAvatar(canvas, cx, cy);
+            float avatarRadius = compactPictureInPicture
+                    ? Math.min(mainRadius, Math.max(dp(8), (getWidth() - dp(14)) / 2f))
+                    : mainRadius;
+            if (speaking) drawSpeechWaves(canvas, cx, cy, boundaryRadius, avatarRadius);
+            if (!compactPictureInPicture) for (ArenaBubble bubble : bubbles) drawGameBubble(canvas, bubble);
+            drawMainAvatar(canvas, cx, cy, avatarRadius);
 
             if (animating) postInvalidateOnAnimation();
         }
 
-        private void drawSpeechWaves(Canvas canvas, float cx, float cy, float boundaryRadius) {
-            float inner = mainRadius + dp(5);
+        private void drawSpeechWaves(Canvas canvas, float cx, float cy, float boundaryRadius, float avatarRadius) {
+            float inner = avatarRadius + dp(5);
             float maxRadius = Math.min(boundaryRadius - dp(4), inner + dp(49));
             float elapsed = (SystemClock.uptimeMillis() - speechAnimationStarted) / 1450f;
             paint.setStyle(Paint.Style.STROKE);
@@ -2435,21 +2562,21 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             }
         }
 
-        private void drawMainAvatar(Canvas canvas, float cx, float cy) {
+        private void drawMainAvatar(Canvas canvas, float cx, float cy, float avatarRadius) {
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(SURFACE_2);
-            canvas.drawCircle(cx, cy, mainRadius, paint);
+            canvas.drawCircle(cx, cy, avatarRadius, paint);
             if (mainAvatar != null && !mainAvatar.isRecycled()) {
                 Path clip = new Path();
-                clip.addCircle(cx, cy, mainRadius - dp(2), Path.Direction.CW);
+                clip.addCircle(cx, cy, avatarRadius - dp(2), Path.Direction.CW);
                 canvas.save();
                 canvas.clipPath(clip);
-                canvas.drawBitmap(mainAvatar, null, new RectF(cx - mainRadius, cy - mainRadius, cx + mainRadius, cy + mainRadius), photoPaint);
+                canvas.drawBitmap(mainAvatar, null, new RectF(cx - avatarRadius, cy - avatarRadius, cx + avatarRadius, cy + avatarRadius), photoPaint);
                 canvas.restore();
             } else {
                 paint.setStyle(Paint.Style.FILL);
                 paint.setColor(ACCENT);
-                paint.setTextSize(dp(29));
+                paint.setTextSize(compactPictureInPicture ? dp(20) : dp(29));
                 String initial = profileName.isEmpty() ? "К" : profileName.substring(0, 1).toUpperCase(Locale.getDefault());
                 canvas.drawText(initial, cx, cy + dp(10), paint);
             }
@@ -2457,13 +2584,14 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             paint.setColor(ACCENT);
             paint.setAlpha(245);
             paint.setStrokeWidth(dp(2.5f));
-            canvas.drawCircle(cx, cy, mainRadius, paint);
+            canvas.drawCircle(cx, cy, avatarRadius, paint);
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(Color.WHITE);
-            paint.setTextSize(dp(15));
+            paint.setTextSize(compactPictureInPicture ? dp(11) : dp(15));
             String displayName = profileName.isEmpty() ? "Вы" : profileName;
-            if (displayName.length() > 20) displayName = displayName.substring(0, 19) + "…";
-            canvas.drawText(displayName, cx, cy + mainRadius + dp(21), paint);
+            int maxLength = compactPictureInPicture ? 12 : 20;
+            if (displayName.length() > maxLength) displayName = displayName.substring(0, maxLength - 1) + "…";
+            canvas.drawText(displayName, cx, cy + avatarRadius + dp(compactPictureInPicture ? 16 : 21), paint);
         }
 
         private void drawGameBubble(Canvas canvas, ArenaBubble bubble) {
@@ -2709,7 +2837,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private PictureInPictureParams pictureInPictureParams() {
-        float ratio = 16f / 9f;
+        float ratio = "rooms".equals(activeTab) && joinedRoomId != null ? 9f / 16f : 16f / 9f;
         if ("feed".equals(activeTab) && videoWidth > 0 && videoHeight > 0) {
             ratio = videoWidth / (float) videoHeight;
             if (ratio < 0.42f || ratio > 2.39f) ratio = 16f / 9f;
@@ -2726,12 +2854,20 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             String actionTitle = playing ? "Пауза" : "Воспроизвести";
             RemoteAction playPause = new RemoteAction(Icon.createWithResource(this, iconResource), actionTitle, actionTitle, actionPendingIntent);
             builder.setActions(Collections.singletonList(playPause));
+        } else if ("rooms".equals(activeTab) && joinedRoomId != null) {
+            Intent actionIntent = new Intent(ACTION_PIP_MIC_TOGGLE).setPackage(getPackageName());
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+            PendingIntent actionPendingIntent = PendingIntent.getBroadcast(this, 4111, actionIntent, flags);
+            String actionTitle = microphoneEnabled ? "Выключить микрофон" : "Включить микрофон";
+            RemoteAction micToggle = new RemoteAction(Icon.createWithResource(this, android.R.drawable.ic_btn_speak_now), actionTitle, actionTitle, actionPendingIntent);
+            builder.setActions(Collections.singletonList(micToggle));
         }
         return builder.build();
     }
 
     private void refreshPictureInPictureActions() {
-        if (Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode() && "feed".equals(activeTab)) {
+        if (Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode()
+                && ("feed".equals(activeTab) || ("rooms".equals(activeTab) && joinedRoomId != null))) {
             try { setPictureInPictureParams(pictureInPictureParams()); } catch (Exception ignored) { }
         }
     }
@@ -2741,6 +2877,29 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         for (View overlay : overlays) {
             if (overlay != null) overlay.setVisibility(inPictureInPicture ? View.GONE : View.VISIBLE);
         }
+    }
+
+    private void updatePictureInPictureMicButton() {
+        if (pipRoomMicButton == null || pipRoomMicIcon == null) return;
+        pipRoomMicButton.setContentDescription(microphoneEnabled ? "Выключить микрофон" : "Включить микрофон");
+        pipRoomMicButton.setBackground(ripple(round(microphoneEnabled ? ACCENT : SURFACE_2, 28)));
+        pipRoomMicIcon.setTint(microphoneEnabled ? INK : ACCENT);
+    }
+
+    private void setPictureInPictureRoomUi(boolean inPictureInPicture) {
+        if (pipRoomHeader != null) pipRoomHeader.setVisibility(inPictureInPicture ? View.GONE : View.VISIBLE);
+        if (pipRoomControls != null) pipRoomControls.setVisibility(inPictureInPicture ? View.GONE : View.VISIBLE);
+        if (pipRoomPage != null) {
+            int padding = inPictureInPicture ? 0 : dp(18);
+            pipRoomPage.setPadding(padding, padding, padding, padding);
+        }
+        if (pipRoomStageParams != null) {
+            pipRoomStageParams.bottomMargin = inPictureInPicture ? 0 : dp(14);
+            if (pipRoomPage != null && pipRoomPage.getChildCount() > 1) pipRoomPage.getChildAt(1).setLayoutParams(pipRoomStageParams);
+        }
+        if (pipRoomMicButton != null) pipRoomMicButton.setVisibility(inPictureInPicture ? View.VISIBLE : View.GONE);
+        if (voiceArenaView != null) voiceArenaView.setCompactPictureInPicture(inPictureInPicture);
+        updatePictureInPictureMicButton();
     }
 
     @Override protected void onUserLeaveHint() {
@@ -2767,6 +2926,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 handler.post(updateProgress);
                 refreshPictureInPictureActions();
             }
+        } else if ("rooms".equals(activeTab) && joinedRoomId != null) {
+            setPictureInPictureRoomUi(isInPictureInPictureMode);
+            if (isInPictureInPictureMode) refreshPictureInPictureActions();
         }
     }
 
