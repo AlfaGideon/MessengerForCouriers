@@ -17,14 +17,13 @@ done
 BUILD="$ROOT/android/app/build/manual-apk"
 OUTPUT="$ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
 rm -rf "$BUILD"
-mkdir -p "$BUILD/generated" "$BUILD/classes" "$BUILD/dex" "$BUILD/assets"
+mkdir -p "$BUILD/generated" "$BUILD/classes" "$BUILD/dex"
 
 cat > "$BUILD/AndroidManifest.xml" <<'MANIFEST'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="ru.ekip.couriers">
   <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="35" />
-  <uses-permission android:name="android.permission.INTERNET" />
-  <application android:allowBackup="true" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:label="@string/app_name" android:supportsRtl="true" android:theme="@style/AppTheme.NoActionBarLaunch" android:usesCleartextTraffic="false">
+  <application android:allowBackup="false" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:label="@string/app_name" android:supportsRtl="true" android:theme="@style/AppTheme.NoActionBarLaunch" android:usesCleartextTraffic="false">
     <activity android:name="ru.ekip.couriers.MainActivity" android:exported="true" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
@@ -42,24 +41,20 @@ MANIFEST
   --min-sdk-version 24 \
   --target-sdk-version 35 \
   --version-code "${EKIP_APK_VERSION_CODE:-2}" \
-  --version-name "${EKIP_APK_VERSION_NAME:-1.1.0}" \
+  --version-name "${EKIP_APK_VERSION_NAME:-2.0.0}" \
   --auto-add-overlay \
   --java "$BUILD/generated" \
   -o "$BUILD/base.apk" \
   "$BUILD/resources.zip"
 
-WEB_VERSION="${EKIP_WEB_VERSION:-2}"
-[[ "$WEB_VERSION" =~ ^[0-9]{1,9}$ ]] || { echo "EKIP_WEB_VERSION must be a positive integer" >&2; exit 1; }
 javac -encoding UTF-8 -source 8 -target 8 -classpath "$ANDROID_JAR" -d "$BUILD/classes" \
-  "$ROOT/android/app/src/main/java/ru/ekip/couriers/MainActivity.java"
+  "$ROOT/android/app/src/main/java/ru/ekip/couriers/MainActivity.java" \
+  "$BUILD/generated/ru/ekip/couriers/R.java"
 mapfile -d '' CLASS_FILES < <(find "$BUILD/classes" -type f -name '*.class' -print0)
 "$BUILD_TOOLS/d8" --release --min-api 24 --lib "$ANDROID_JAR" --output "$BUILD/dex" "${CLASS_FILES[@]}"
 cp "$BUILD/dex/classes.dex" "$BUILD/classes.dex"
-cp -R "$ROOT/android/app/src/main/assets/public" "$BUILD/assets/public"
-printf '%s\n' "$WEB_VERSION" > "$ROOT/dist/ota-version.txt"
-printf '%s\n' "$WEB_VERSION" > "$BUILD/assets/public/ota-version.txt"
 
-(cd "$BUILD" && zip -q -0 base.apk classes.dex && zip -q -r base.apk assets)
+(cd "$BUILD" && zip -q -0 base.apk classes.dex)
 mkdir -p "$(dirname "$OUTPUT")"
 "$BUILD_TOOLS/zipalign" -f -p 4 "$BUILD/base.apk" "$BUILD/aligned.apk"
 keytool -genkeypair -keystore "$BUILD/debug.keystore" -storepass android -alias androiddebugkey -keypass android \

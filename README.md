@@ -1,30 +1,25 @@
-# Экип
+# Экип — native Android prototype
 
-Android-first app for couriers. A fresh install opens an empty video library. No sample posts or courier photos are bundled.
+The Android APK is a native Java Android application. It does not load a website, use a WebView, or depend on Vite assets at runtime. Screens, navigation, video rendering, room directory, and controls are built from Android Views.
 
-## On-device videos
+## Native video feed
 
-The Android file picker opens the phone's video library. A selected video and its optional caption are stored in IndexedDB inside the app's WebView. The app restores the media after it is closed and reopened, plays it in the library, and allows local deletion. Storage is private to that installation; clearing app data or uninstalling the app removes those files.
+Use the single plus/empty-state action to open Android's system video picker. The selected file is copied into the app's private storage and remains available after restart. The feed uses a native `TextureView`/`MediaPlayer` presentation, crops to fill the phone screen, supports tap to pause/play and vertical swipes between local clips, and has no download control. Files remain on the device and are not uploaded or visible to other people.
 
-This is on-device persistence, not a cloud upload. There is no hosted backend or account system in this repository, so saved videos are not visible to other couriers. Shared feeds and chat delivery require a deployed API, accounts/database, and media storage.
+## Voice rooms
 
-## Persistent voice-room directory
+The APK contains a permanent directory with a common room and city rooms for Saint Petersburg, Moscow, Kazan, Yekaterinburg, and Novosibirsk. Joining opens a native room screen. Remote participants, microphone transport, speaker detection, clip sharing, and app-link routing require a deployed backend/signaling service; those are not implemented in this client-only prototype. The UI indicates this rather than simulating remote users.
 
-The app includes a common room and permanent city-room entries for Saint Petersburg, Moscow, Kazan, Yekaterinburg, and Novosibirsk. The room list does not depend on someone creating a room or being present. At this stage, tapping a room opens it locally on the device; it does not connect microphones or show remote participants. Real cross-device voice requires a deployed WebRTC signalling/media service, which is not included here.
+## Android updates
 
-## Android over-the-air updates
+The GitHub workflow publishes a new debug APK and checksum. Android installs app-code updates through its package installer with user confirmation; an Android application cannot silently replace its own APK from an arbitrary download. The earlier web-bundle updater is no longer used by the native APK.
 
-The Android shell checks the public GitHub OTA manifest on launch and can download a versioned web bundle over HTTPS. The native updater verifies the bundle SHA-256, rejects unexpected download hosts and unsafe ZIP paths, extracts it inside app storage, and serves the new interface on the next WebView load. The Settings screen also has a manual update check. OTA only updates the web interface; changes to native Android code still require installing a new APK. OTA metadata and APKs are published by `.github/workflows/android-apk.yml` to `release/` on the Arena branch.
+## Build
 
-## Build the APK
-
-The Android shell is a native WebView with a system video picker and the app's yellow bird launcher icon. The build script uses Android SDK tools directly, so it does not need to download a Gradle distribution.
-
-Requirements: Node.js 22, JDK 21, Android SDK platform 36 and build-tools 36.0.0.
+Requirements: JDK 21, Android SDK platform 36, and build-tools 36.0.0.
 
 ```bash
-npm ci
-npm run android:apk
+bash scripts/build-android-apk.sh
 ```
 
 Output: `android/app/build/outputs/apk/debug/app-debug.apk`.

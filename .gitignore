@@ -1,8 +1,10 @@
-node_modules/
-dist/
+# Android builds and local SDK configuration
 android/.gradle/
 android/local.properties
 android/**/build/
 *.apk
 *.aab
+*.ap_
+*.dex
+*.class
 .DS_Store
