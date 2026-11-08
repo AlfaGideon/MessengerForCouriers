@@ -6,9 +6,13 @@ The Android APK is a native Java Android application. It does not load a website
 
 Use the single plus/empty-state action to open Android's system video picker. The selected file is copied into the app's private storage and remains available after restart. The feed uses a native `TextureView`/`MediaPlayer` presentation, crops to fill the phone screen, supports tap to pause/play and vertical swipes between local clips, and has no download control. Files remain on the device and are not uploaded or visible to other people.
 
-## Voice rooms
+## Voice rooms and city access
 
-The APK contains a permanent directory with a common room and city rooms for Saint Petersburg, Moscow, Kazan, Yekaterinburg, and Novosibirsk. Joining opens a native room screen. Remote participants, microphone transport, speaker detection, clip sharing, and app-link routing require a deployed backend/signaling service; those are not implemented in this client-only prototype. The UI indicates this rather than simulating remote users.
+The bottom navigation has a prominent round microphone action. The room list is filtered to exactly two entries: the common room and the locally selected city. Choose a city in **Settings → Your city**; the current UI does not list other cities. This is client-side filtering only—real access control, remote participants, and microphone transport require authenticated backend/signaling enforcement, which is not yet deployed.
+
+## Brand and visual system
+
+The app uses a dark slate/teal palette and a 3D swift-messenger mascot. The former yellow treatment has been removed from the launcher, splash screen, and primary controls.
 
 ## Android updates and permanent signing
 

@@ -67,12 +67,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private static final int UPDATE_PERMISSION_REQUEST = 4103;
     private static final String UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/update.json";
     private static final String UPDATE_APK_PREFIX = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/ekip-debug.apk";
-    private static final int INK = Color.rgb(20, 21, 25);
-    private static final int SURFACE = Color.rgb(29, 30, 35);
-    private static final int SURFACE_2 = Color.rgb(39, 40, 46);
-    private static final int MUTED = Color.rgb(158, 160, 168);
-    private static final int YELLOW = Color.rgb(255, 211, 50);
-    private static final int RED = Color.rgb(234, 82, 86);
+    private static final int INK = Color.rgb(16, 24, 32);
+    private static final int SURFACE = Color.rgb(27, 37, 48);
+    private static final int SURFACE_2 = Color.rgb(36, 48, 61);
+    private static final int MUTED = Color.rgb(157, 171, 184);
+    private static final int ACCENT = Color.rgb(80, 210, 192);
+    private static final int ACCENT_2 = Color.rgb(143, 161, 255);
+    private static final int RED = Color.rgb(255, 105, 125);
+    private static final String[] CITY_IDS = {"spb", "moscow", "kazan", "ekb", "novosibirsk", "krasnodar", "nizhny", "vladivostok"};
+    private static final String[] CITY_NAMES = {"Санкт-Петербург", "Москва", "Казань", "Екатеринбург", "Новосибирск", "Краснодар", "Нижний Новгород", "Владивосток"};
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final ArrayList<VideoItem> videos = new ArrayList<>();
@@ -107,12 +110,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private boolean muted = false;
     private boolean copyingVideo = false;
     private String profileName = "";
+    private String cityId = "spb";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.rgb(11, 12, 15));
-        getWindow().setNavigationBarColor(Color.rgb(10, 11, 14));
-        if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarDividerColor(Color.rgb(38, 39, 44));
+        getWindow().setStatusBarColor(INK);
+        getWindow().setNavigationBarColor(Color.rgb(10, 16, 22));
+        if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarDividerColor(Color.rgb(43, 58, 71));
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         getWindow().getDecorView().setSystemUiVisibility(0);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -135,12 +139,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             }
         } catch (Exception ignored) { }
         if (videos.size() > 0) currentVideoIndex = Math.max(0, Math.min(prefs.getInt("video_index", 0), videos.size() - 1));
-        rooms.add(new RoomItem("common", "Общая комната", "Для всех городов", YELLOW, true));
-        rooms.add(new RoomItem("spb", "Санкт-Петербург", "Городская голосовая", 0xFF80A8FF, false));
-        rooms.add(new RoomItem("moscow", "Москва", "Городская голосовая", 0xFFF48EAA, false));
-        rooms.add(new RoomItem("kazan", "Казань", "Городская голосовая", 0xFF76C79A, false));
-        rooms.add(new RoomItem("ekb", "Екатеринбург", "Городская голосовая", 0xFFFFD45C, false));
-        rooms.add(new RoomItem("novosibirsk", "Новосибирск", "Городская голосовая", 0xFF83A8FF, false));
+        cityId = prefs.getString("city_id", "spb");
+        if (cityIndex(cityId) < 0) cityId = "spb";
+        rebuildAccessibleRooms();
     }
 
     private void buildShell() {
@@ -150,7 +151,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         contentFrame = new FrameLayout(this);
         appRoot.addView(contentFrame, new LinearLayout.LayoutParams(-1, 0, 1f));
         bottomNavigation = buildBottomNavigation();
-        appRoot.addView(bottomNavigation, new LinearLayout.LayoutParams(-1, dp(68)));
+        appRoot.addView(bottomNavigation, new LinearLayout.LayoutParams(-1, dp(88)));
         if (Build.VERSION.SDK_INT >= 30) {
             appRoot.setOnApplyWindowInsetsListener((view, insets) -> {
                 view.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
@@ -164,31 +165,69 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER);
-        bar.setPadding(dp(6), dp(7), dp(6), dp(5));
-        bar.setBackgroundColor(0xFF111216);
+        bar.setPadding(dp(7), dp(5), dp(7), dp(5));
+        bar.setBackground(round(Color.rgb(18, 28, 38), 27));
+        bar.setElevation(dp(10));
+        bar.setClipChildren(false);
+        bar.setClipToPadding(false);
         String[] ids = {"feed", "chats", "rooms", "profile", "more"};
         String[] labels = {"Лента", "Чаты", "Голос", "Профиль", "Ещё"};
         String[] icons = {"home", "chat", "mic", "profile", "more"};
         for (int i = 0; i < ids.length; i++) {
             final String id = ids[i];
+            if ("rooms".equals(id)) {
+                FrameLayout slot = new FrameLayout(this);
+                slot.setTag(id);
+                LinearLayout center = new LinearLayout(this);
+                center.setOrientation(LinearLayout.VERTICAL);
+                center.setGravity(Gravity.CENTER);
+                center.setTranslationY(-dp(3));
+                FrameLayout halo = new FrameLayout(this);
+                halo.setBackground(round(0x3350D2C0, 36));
+                FrameLayout circle = new FrameLayout(this);
+                circle.setTag("voice-button");
+                circle.setContentDescription("Открыть голосовые комнаты");
+                circle.setBackground(ripple(round(ACCENT, 32)));
+                circle.setElevation(dp(8));
+                IconView mic = new IconView(this, "mic", INK, dp(28));
+                circle.addView(mic, centered());
+                FrameLayout.LayoutParams circleParams = new FrameLayout.LayoutParams(dp(58), dp(58), Gravity.CENTER);
+                halo.addView(circle, circleParams);
+                center.addView(halo, new LinearLayout.LayoutParams(dp(66), dp(66)));
+                TextView label = text(labels[i], 10, MUTED, true);
+                label.setTag("nav-label");
+                LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-2, -2);
+                labelParams.topMargin = dp(1);
+                center.addView(label, labelParams);
+                slot.addView(center, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+                slot.setOnClickListener(view -> {
+                    joinedRoomId = null;
+                    activeTab = id;
+                    renderPage();
+                });
+                bar.addView(slot, new LinearLayout.LayoutParams(0, -1, 1f));
+                continue;
+            }
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER);
-            item.setPadding(0, dp(4), 0, dp(1));
+            item.setPadding(0, dp(7), 0, dp(4));
             IconView icon = new IconView(this, icons[i], MUTED, dp(21));
+            icon.setTag("nav-icon");
             TextView label = text(labels[i], 10, MUTED, true);
+            label.setTag("nav-label");
             item.addView(icon, new LinearLayout.LayoutParams(dp(25), dp(26)));
             LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-2, -2);
             labelParams.topMargin = dp(2);
             item.addView(label, labelParams);
-            item.setBackground(ripple(round(0x00000000, 14)));
+            item.setBackground(ripple(round(0x00000000, 16)));
             item.setOnClickListener(view -> {
                 joinedRoomId = null;
                 activeTab = id;
                 renderPage();
             });
-            bar.addView(item, new LinearLayout.LayoutParams(0, -1, 1f));
             item.setTag(id);
+            bar.addView(item, new LinearLayout.LayoutParams(0, -1, 1f));
         }
         return bar;
     }
@@ -196,12 +235,25 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private void updateNavigationSelection() {
         if (bottomNavigation == null) return;
         for (int i = 0; i < bottomNavigation.getChildCount(); i++) {
-            LinearLayout item = (LinearLayout) bottomNavigation.getChildAt(i);
+            View item = bottomNavigation.getChildAt(i);
             String id = (String) item.getTag();
-            int color = activeTab.equals(id) ? YELLOW : MUTED;
-            ((IconView) item.getChildAt(0)).setTint(color);
-            ((TextView) item.getChildAt(1)).setTextColor(color);
-            item.setBackground(ripple(round(activeTab.equals(id) ? 0x22FFD332 : 0x00000000, 14)));
+            boolean selected = activeTab.equals(id);
+            if ("rooms".equals(id)) {
+                TextView label = item.findViewWithTag("nav-label");
+                View button = item.findViewWithTag("voice-button");
+                if (label != null) label.setTextColor(selected ? ACCENT : MUTED);
+                if (button != null) {
+                    float scale = selected ? 1.06f : 1f;
+                    button.setScaleX(scale);
+                    button.setScaleY(scale);
+                }
+                continue;
+            }
+            LinearLayout tab = (LinearLayout) item;
+            int color = selected ? ACCENT : MUTED;
+            ((IconView) tab.getChildAt(0)).setTint(color);
+            ((TextView) tab.getChildAt(1)).setTextColor(color);
+            tab.setBackground(ripple(round(selected ? 0x1F50D2C0 : 0x00000000, 16)));
         }
     }
 
@@ -258,14 +310,14 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         empty.setGravity(Gravity.CENTER);
         empty.setPadding(dp(34), dp(32), dp(34), dp(34));
         ImageView mark = new ImageView(this);
-        mark.setImageResource(ru.ekip.couriers.R.mipmap.ic_launcher);
-        mark.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        mark.setBackground(round(YELLOW, 22));
+        mark.setImageResource(ru.ekip.couriers.R.drawable.ekip_mascot);
+        mark.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        mark.setBackground(round(INK, 22));
         mark.setClipToOutline(true);
-        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(62), dp(62));
-        markParams.bottomMargin = dp(22);
+        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(250), dp(138));
+        markParams.bottomMargin = dp(17);
         empty.addView(mark, markParams);
-        TextView eyebrow = text("ТВОЯ ВИДЕОМЕДИАТЕКА", 11, YELLOW, true);
+        TextView eyebrow = text("ТВОЯ ВИДЕОМЕДИАТЕКА", 11, ACCENT, true);
         eyebrow.setLetterSpacing(.12f);
         eyebrow.setGravity(Gravity.CENTER);
         empty.addView(eyebrow);
@@ -281,7 +333,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         subtitleParams.topMargin = dp(9);
         subtitleParams.bottomMargin = dp(24);
         empty.addView(subtitle, subtitleParams);
-        TextView choose = pillButton("＋   Выбрать видео", YELLOW, INK, 15);
+        TextView choose = pillButton("＋   Выбрать видео", ACCENT, INK, 15);
         choose.setOnClickListener(view -> openVideoPicker());
         empty.addView(choose, new LinearLayout.LayoutParams(-1, dp(54)));
         TextView privacy = text("ХРАНИТСЯ ТОЛЬКО НА ЭТОМ ТЕЛЕФОНЕ", 9, MUTED, true);
@@ -301,7 +353,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         ImageView logo = new ImageView(this);
         try { logo.setImageResource(ru.ekip.couriers.R.mipmap.ic_launcher); } catch (Exception ignored) { }
         logo.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        logo.setBackground(round(YELLOW, 12));
+        logo.setBackground(round(SURFACE, 12));
         logo.setClipToOutline(true);
         top.addView(logo, new LinearLayout.LayoutParams(dp(37), dp(37)));
         LinearLayout brand = new LinearLayout(this);
@@ -314,7 +366,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         brand.addView(sub);
         top.addView(brand, new LinearLayout.LayoutParams(0, -2, 1f));
         if (videos.size() > 0) {
-            TextView add = roundIconButton("add", YELLOW, INK, 48);
+            TextView add = roundIconButton("add", ACCENT, INK, 48);
             add.setContentDescription("Добавить видео");
             add.setOnClickListener(view -> openVideoPicker());
             top.addView(add);
@@ -339,7 +391,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
         info.setPadding(dp(18), 0, dp(84), dp(16));
-        TextView badge = text("●  МОЯ МЕДИАТЕКА", 10, YELLOW, true);
+        TextView badge = text("●  МОЯ МЕДИАТЕКА", 10, ACCENT, true);
         badge.setLetterSpacing(.08f);
         info.addView(badge);
         TextView title = text(videos.get(currentVideoIndex).name, 16, Color.WHITE, true);
@@ -391,8 +443,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         playback.addView(play, new LinearLayout.LayoutParams(dp(38), dp(42)));
         seekBar = new SeekBar(this);
         seekBar.setMax(1000);
-        seekBar.setProgressTintList(ColorStateList.valueOf(YELLOW));
-        seekBar.setThumbTintList(ColorStateList.valueOf(YELLOW));
+        seekBar.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        seekBar.setThumbTintList(ColorStateList.valueOf(ACCENT));
         seekBar.setProgressBackgroundTintList(ColorStateList.valueOf(0x77FFFFFF));
         LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(0, dp(36), 1f);
         seekParams.leftMargin = dp(7);
@@ -428,7 +480,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         card.setGravity(Gravity.CENTER);
         card.setPadding(dp(24), dp(30), dp(24), dp(30));
         card.setBackground(round(SURFACE, 24));
-        IconView art = new IconView(this, icon, YELLOW, dp(32));
+        IconView art = new IconView(this, icon, ACCENT, dp(32));
         LinearLayout.LayoutParams artParams = new LinearLayout.LayoutParams(dp(58), dp(58));
         artParams.bottomMargin = dp(18);
         card.addView(art, artParams);
@@ -451,15 +503,26 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void renderRooms() {
         LinearLayout page = pageColumn();
-        addPageHeader(page, "Голосовые", "Общая и городские комнаты");
+        addPageHeader(page, "Голосовые", cityName() + " · свои на связи");
+        LinearLayout accessCard = new LinearLayout(this);
+        accessCard.setOrientation(LinearLayout.VERTICAL);
+        accessCard.setPadding(dp(18), dp(16), dp(18), dp(16));
+        accessCard.setBackground(round(SURFACE, 20));
+        TextView accessTitle = text("Две комнаты для вас", 16, Color.WHITE, true);
+        accessCard.addView(accessTitle);
+        TextView accessDetail = text("Общий голосовой канал и голосовой канал вашего города. Другие города не показываются.", 12, MUTED, false);
+        accessDetail.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams accessDetailParams = new LinearLayout.LayoutParams(-1, -2);
+        accessDetailParams.topMargin = dp(5);
+        accessCard.addView(accessDetail, accessDetailParams);
+        LinearLayout.LayoutParams accessParams = new LinearLayout.LayoutParams(-1, -2);
+        accessParams.topMargin = dp(12);
+        accessParams.bottomMargin = dp(16);
+        page.addView(accessCard, accessParams);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        TextView tip = text("Комнаты доступны всегда — зайти можно первым.", 13, MUTED, false);
-        LinearLayout.LayoutParams tipParams = new LinearLayout.LayoutParams(-1, -2);
-        tipParams.bottomMargin = dp(15);
-        list.addView(tip, tipParams);
         for (RoomItem room : rooms) list.addView(roomCard(room));
         scroll.addView(list);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -487,17 +550,22 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         TextView name = text(room.name, 15, Color.WHITE, true);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-1, -2);
         nameParams.topMargin = dp(4);
-        TextView status = text("Постоянная комната", 11, MUTED, false);
+        TextView status = text(room.global ? "Открыта всем" : "Только ваш город", 11, MUTED, false);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
         statusParams.topMargin = dp(4);
         copy.addView(kind);
         copy.addView(name, nameParams);
         copy.addView(status, statusParams);
         card.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
-        TextView join = pillButton("Зайти", YELLOW, INK, 12);
+        TextView join = pillButton("Открыть", ACCENT, INK, 12);
         card.addView(join, new LinearLayout.LayoutParams(dp(76), dp(42)));
         join.setOnClickListener(view -> {
+            if (!room.global && !room.id.equals(cityId)) {
+                Toast.makeText(this, "Доступна только городская комната «" + cityName() + "»", Toast.LENGTH_SHORT).show();
+                return;
+            }
             joinedRoomId = room.id;
+            activeTab = "rooms";
             renderPage();
         });
         return card;
@@ -522,7 +590,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         roomTitleParams.topMargin = dp(3);
         titleGroup.addView(roomTitle, roomTitleParams);
         header.addView(titleGroup, new LinearLayout.LayoutParams(0, -2, 1f));
-        TextView count = pillButton("1 участник", SURFACE_2, Color.WHITE, 10);
+        TextView count = pillButton(room.global ? "ОБЩАЯ" : "ВАШ ГОРОД", SURFACE_2, ACCENT, 9);
         header.addView(count, new LinearLayout.LayoutParams(-2, dp(38)));
         page.addView(header);
 
@@ -536,7 +604,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         page.addView(stage, stageParams);
         TextView avatar = text("Я", 35, INK, true);
         avatar.setGravity(Gravity.CENTER);
-        avatar.setBackground(round(YELLOW, 32));
+        avatar.setBackground(round(ACCENT, 32));
         stage.addView(avatar, new LinearLayout.LayoutParams(dp(104), dp(104)));
         TextView self = text(profileName.isEmpty() ? "Вы" : profileName, 19, Color.WHITE, true);
         LinearLayout.LayoutParams selfParams = new LinearLayout.LayoutParams(-2, -2);
@@ -582,7 +650,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         card.setBackground(round(SURFACE, 22));
         TextView avatar = text(profileName.isEmpty() ? "?" : profileName.substring(0, 1).toUpperCase(Locale.getDefault()), 28, INK, true);
         avatar.setGravity(Gravity.CENTER);
-        avatar.setBackground(round(YELLOW, 28));
+        avatar.setBackground(round(ACCENT, 28));
         card.addView(avatar, new LinearLayout.LayoutParams(dp(76), dp(76)));
         TextView title = text(profileName.isEmpty() ? "Как к вам обращаться?" : profileName, 19, Color.WHITE, true);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
@@ -601,7 +669,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(-1, dp(52));
         inputParams.topMargin = dp(22);
         card.addView(input, inputParams);
-        TextView save = pillButton("Сохранить профиль", YELLOW, INK, 14);
+        TextView save = pillButton("Сохранить профиль", ACCENT, INK, 14);
         LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(50));
         saveParams.topMargin = dp(12);
         card.addView(save, saveParams);
@@ -618,25 +686,111 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void renderSettings() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
         LinearLayout page = pageColumn();
-        addPageHeader(page, "Ещё", "Настройки приложения");
+        addPageHeader(page, "Настройки", "Экип под ваш город и маршрут");
+
+        addSectionLabel(page, "ВАШ ГОРОД");
+        LinearLayout cityCard = new LinearLayout(this);
+        cityCard.setOrientation(LinearLayout.HORIZONTAL);
+        cityCard.setGravity(Gravity.CENTER_VERTICAL);
+        cityCard.setPadding(dp(16), dp(16), dp(14), dp(16));
+        cityCard.setBackground(ripple(round(SURFACE, 20)));
+        TextView cityIcon = text("⌖", 25, INK, true);
+        cityIcon.setGravity(Gravity.CENTER);
+        cityIcon.setBackground(round(ACCENT, 16));
+        cityCard.addView(cityIcon, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout cityCopy = new LinearLayout(this);
+        cityCopy.setOrientation(LinearLayout.VERTICAL);
+        cityCopy.setPadding(dp(13), 0, dp(8), 0);
+        cityCopy.addView(text(cityName(), 16, Color.WHITE, true));
+        TextView cityDetail = text("Нажмите, чтобы сменить город", 12, MUTED, false);
+        LinearLayout.LayoutParams cityDetailParams = new LinearLayout.LayoutParams(-1, -2);
+        cityDetailParams.topMargin = dp(4);
+        cityCopy.addView(cityDetail, cityDetailParams);
+        cityCard.addView(cityCopy, new LinearLayout.LayoutParams(0, -2, 1f));
+        cityCard.addView(new IconView(this, "next", MUTED, dp(19)), new LinearLayout.LayoutParams(dp(24), dp(24)));
+        cityCard.setOnClickListener(view -> showCityPicker());
+        LinearLayout.LayoutParams cityCardParams = new LinearLayout.LayoutParams(-1, -2);
+        cityCardParams.topMargin = dp(9);
+        page.addView(cityCard, cityCardParams);
+
+        addSectionLabel(page, "ПРОФИЛЬ");
+        LinearLayout profileCard = settingsCard();
+        addSettingRow(profileCard, "Мой профиль", profileName.isEmpty() ? "Добавить имя" : profileName, "◉", view -> {
+            activeTab = "profile";
+            renderPage();
+        });
+        LinearLayout.LayoutParams profileParams = new LinearLayout.LayoutParams(-1, -2);
+        profileParams.topMargin = dp(9);
+        page.addView(profileCard, profileParams);
+
+        addSectionLabel(page, "ГОЛОСОВЫЕ КОМНАТЫ");
+        LinearLayout voiceCard = settingsCard();
+        voiceCard.setPadding(dp(18), dp(17), dp(18), dp(17));
+        voiceCard.addView(text("Только общий и ваш город", 15, Color.WHITE, true));
+        TextView voiceDetail = text("В списке будут две комнаты: общий канал и «" + cityName() + "». Выбор города меняет доступную городскую комнату.", 12, MUTED, false);
+        voiceDetail.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams voiceDetailParams = new LinearLayout.LayoutParams(-1, -2);
+        voiceDetailParams.topMargin = dp(6);
+        voiceCard.addView(voiceDetail, voiceDetailParams);
+        LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(-1, -2);
+        voiceParams.topMargin = dp(9);
+        page.addView(voiceCard, voiceParams);
+
+        addSectionLabel(page, "ПРИЛОЖЕНИЕ");
+        LinearLayout appCard = settingsCard();
+        addSettingRow(appCard, "Медиатека", videos.size() == 0 ? "Видео хранятся только на телефоне" : videos.size() + " видео · только на телефоне", "▣", view -> new AlertDialog.Builder(this).setTitle("Локальная медиатека").setMessage("Выбранные видео хранятся в приватной памяти этого телефона и не публикуются на сервере.").setPositiveButton("Понятно", null).show());
+        addSettingRow(appCard, "Обновить приложение", "Проверить новую версию", "↻", view -> checkForUpdates());
+        addSettingRow(appCard, "О приложении", "Экип · Android", "ⓘ", view -> new AlertDialog.Builder(this).setTitle("Экип").setMessage("Нативное Android-приложение. Голосовые соединения между телефонами пока требуют серверной части.").setPositiveButton("Понятно", null).show());
+        LinearLayout.LayoutParams appParams = new LinearLayout.LayoutParams(-1, -2);
+        appParams.topMargin = dp(9);
+        appParams.bottomMargin = dp(18);
+        page.addView(appCard, appParams);
+
+        scroll.addView(page, new ScrollView.LayoutParams(-1, -2));
+        contentFrame.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private LinearLayout settingsCard() {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.TOP);
         card.setPadding(dp(16), dp(8), dp(16), dp(8));
         card.setBackground(round(SURFACE, 20));
-        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
-        cardParams.topMargin = dp(18);
-        page.addView(card, cardParams);
-        addSettingRow(card, "Медиатека", "Видео хранятся на телефоне", "▣", view -> new AlertDialog.Builder(this).setTitle("Локальная медиатека").setMessage("Выбранные видео копируются в приватное хранилище приложения и не отправляются в сеть.").setPositiveButton("Понятно", null).show());
-        addSettingRow(card, "Обновить приложение", "Проверить и установить новую версию", "↻", view -> checkForUpdates());
-        addSettingRow(card, "О приложении", "Экип · Android", "ⓘ", view -> new AlertDialog.Builder(this).setTitle("Экип").setMessage("Нативное Android-приложение. Видео хранятся только на этом устройстве.").setPositiveButton("Понятно", null).show());
-        TextView note = text("Android попросит подтвердить установку обновления. Голосовые звонки и публикация видео требуют сервера.", 12, MUTED, false);
-        note.setLineSpacing(dp(3), 1f);
-        LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(-1, -2);
-        noteParams.topMargin = dp(18);
-        page.addView(note, noteParams);
-        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        return card;
+    }
+
+    private void addSectionLabel(LinearLayout parent, String label) {
+        TextView title = text(label, 10, MUTED, true);
+        title.setLetterSpacing(.11f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(20);
+        params.leftMargin = dp(4);
+        parent.addView(title, params);
+    }
+
+    private void showCityPicker() {
+        int selected = Math.max(0, cityIndex(cityId));
+        new AlertDialog.Builder(this)
+                .setTitle("Выберите свой город")
+                .setSingleChoiceItems(CITY_NAMES, selected, (dialog, which) -> {
+                    setCity(CITY_IDS[which]);
+                    dialog.dismiss();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void setCity(String newCityId) {
+        if (cityIndex(newCityId) < 0 || newCityId.equals(cityId)) return;
+        cityId = newCityId;
+        getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putString("city_id", cityId).apply();
+        rebuildAccessibleRooms();
+        if (joinedRoomId != null && !"common".equals(joinedRoomId) && !joinedRoomId.equals(cityId)) joinedRoomId = null;
+        Toast.makeText(this, "Город изменён: " + cityName(), Toast.LENGTH_SHORT).show();
+        renderPage();
     }
 
     private void addSettingRow(LinearLayout parent, String title, String detail, String glyph, View.OnClickListener action) {
@@ -645,9 +799,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setMinimumHeight(dp(68));
         row.setPadding(0, dp(12), 0, dp(12));
-        TextView icon = text(glyph, 21, YELLOW, true);
+        TextView icon = text(glyph, 21, ACCENT, true);
         icon.setGravity(Gravity.CENTER);
-        icon.setBackground(round(0x22FFD332, 12));
+        icon.setBackground(round(0x2250D2C0, 12));
         row.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
@@ -665,7 +819,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         row.setOnClickListener(action);
         parent.addView(row, new LinearLayout.LayoutParams(-1, -2));
         View divider = new View(this);
-        divider.setBackgroundColor(0xFF36373D);
+        divider.setBackgroundColor(0xFF30414F);
         parent.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
@@ -901,7 +1055,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         box.setPadding(dp(24), dp(24), dp(24), dp(24));
         box.setBackground(round(SURFACE, 22));
         ProgressBar progress = new ProgressBar(this);
-        progress.setIndeterminateTintList(ColorStateList.valueOf(YELLOW));
+        progress.setIndeterminateTintList(ColorStateList.valueOf(ACCENT));
         box.addView(progress, new LinearLayout.LayoutParams(dp(42), dp(42)));
         TextView label = text("Сохраняю видео…", 14, Color.WHITE, true);
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-2, -2);
@@ -1070,7 +1224,24 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) { releasePlayer(); return true; }
     @Override public void onSurfaceTextureUpdated(SurfaceTexture surface) { }
 
+    private void rebuildAccessibleRooms() {
+        rooms.clear();
+        rooms.add(new RoomItem("common", "Общий голосовой", "Открыт для всех городов", ACCENT, true));
+        rooms.add(new RoomItem(cityId, cityName(), "Только для курьеров вашего города", ACCENT_2, false));
+    }
+
+    private int cityIndex(String id) {
+        for (int i = 0; i < CITY_IDS.length; i++) if (CITY_IDS[i].equals(id)) return i;
+        return -1;
+    }
+
+    private String cityName() {
+        int index = cityIndex(cityId);
+        return index < 0 ? CITY_NAMES[0] : CITY_NAMES[index];
+    }
+
     private RoomItem findRoom(String id) {
+        if (id == null) return null;
         for (RoomItem room : rooms) if (room.id.equals(id)) return room;
         return null;
     }
