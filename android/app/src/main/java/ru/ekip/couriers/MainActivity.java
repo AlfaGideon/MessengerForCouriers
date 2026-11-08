@@ -21,13 +21,18 @@ import android.graphics.SurfaceTexture;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioRecord;
 import android.media.MediaPlayer;
+import android.media.MediaRecorder;
+import android.media.ToneGenerator;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.InputFilter;
@@ -68,6 +73,7 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Native Android UI. The APK contains no WebView and renders every screen with Android Views. */
 public class MainActivity extends Activity implements TextureView.SurfaceTextureListener {
@@ -120,6 +126,12 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private TextureView textureView;
     private MediaPlayer player;
     private Surface videoSurface;
+    private volatile AudioRecord microphoneRecorder;
+    private volatile Thread microphoneMeterThread;
+    private final AtomicBoolean microphoneCaptureRunning = new AtomicBoolean(false);
+    private boolean microphoneEnabled = false;
+    private boolean microphoneWasStoppedForPause = false;
+    private VoiceWaveView voiceWaveView;
     private TextView playOverlay;
     private TextView videoTime;
     private SeekBar seekBar;
@@ -247,7 +259,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 center.addView(label, labelParams);
                 slot.addView(center, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
                 slot.setOnClickListener(view -> {
-                    joinedRoomId = null;
+                    if (joinedRoomId != null) closeVoiceRoom();
                     activeTab = id;
                     renderPage();
                 });
@@ -268,7 +280,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             item.addView(label, labelParams);
             item.setBackground(ripple(round(0x00000000, 16)));
             item.setOnClickListener(view -> {
-                joinedRoomId = null;
+                if (joinedRoomId != null) closeVoiceRoom();
                 activeTab = id;
                 renderPage();
             });
@@ -304,6 +316,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void renderPage() {
+        if (voiceWaveView != null) voiceWaveView.setActive(false);
+        voiceWaveView = null;
         releasePlayer();
         if (contentFrame == null) return;
         contentFrame.removeAllViews();
@@ -653,6 +667,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             joinedRoomId = room.id;
             activeTab = "rooms";
             renderPage();
+            playVoiceCue(true);
             requestMicrophonePermission();
         });
         return card;
@@ -667,7 +682,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         header.setPadding(0, 0, 0, dp(18));
         TextView back = roundIconButton("back", SURFACE_2, Color.WHITE, 46);
         header.addView(back, new LinearLayout.LayoutParams(dp(46), dp(46)));
-        back.setOnClickListener(view -> { joinedRoomId = null; renderPage(); });
+        back.setOnClickListener(view -> leaveVoiceRoom());
         LinearLayout titleGroup = new LinearLayout(this);
         titleGroup.setOrientation(LinearLayout.VERTICAL);
         titleGroup.setPadding(dp(12), 0, 0, 0);
@@ -689,13 +704,19 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout.LayoutParams stageParams = new LinearLayout.LayoutParams(-1, 0, 1f);
         stageParams.bottomMargin = dp(14);
         page.addView(stage, stageParams);
+        FrameLayout voiceVisual = new FrameLayout(this);
+        voiceWaveView = new VoiceWaveView(this);
+        voiceWaveView.setActive(microphoneEnabled);
+        voiceVisual.addView(voiceWaveView, centered());
         FrameLayout avatar = createAvatarView(dp(104));
-        stage.addView(avatar, new LinearLayout.LayoutParams(dp(104), dp(104)));
+        voiceVisual.addView(avatar, new FrameLayout.LayoutParams(dp(104), dp(104), Gravity.CENTER));
+        stage.addView(voiceVisual, new LinearLayout.LayoutParams(dp(190), dp(190)));
         TextView self = text(profileName.isEmpty() ? "Вы" : profileName, 19, Color.WHITE, true);
         LinearLayout.LayoutParams selfParams = new LinearLayout.LayoutParams(-2, -2);
         selfParams.topMargin = dp(18);
         stage.addView(self, selfParams);
-        TextView micState = text(hasMicrophonePermission() ? "Доступ к микрофону открыт" : "Нужно разрешение на микрофон", 12, hasMicrophonePermission() ? ACCENT : MUTED, true);
+        String micStatus = microphoneEnabled ? "Микрофон включён · уровень звука локальный" : hasMicrophonePermission() ? "Микрофон выключен" : "Нужно разрешение на микрофон";
+        TextView micState = text(micStatus, 12, microphoneEnabled ? ACCENT : MUTED, true);
         LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(-2, -2);
         micParams.topMargin = dp(6);
         stage.addView(micState, micParams);
@@ -708,17 +729,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         LinearLayout controls = new LinearLayout(this);
         controls.setGravity(Gravity.CENTER);
-        TextView mic = pillButton(hasMicrophonePermission() ? "✓  Микрофон разрешён" : "Разрешить микрофон", hasMicrophonePermission() ? 0x22FFCF22 : ACCENT, hasMicrophonePermission() ? ACCENT : INK, 12);
+        TextView mic = pillButton(microphoneEnabled ? "Выключить микрофон" : hasMicrophonePermission() ? "Включить микрофон" : "Разрешить микрофон",
+                microphoneEnabled ? SURFACE_2 : ACCENT, microphoneEnabled ? Color.WHITE : INK, 12);
         controls.addView(mic, new LinearLayout.LayoutParams(0, dp(54), 1f));
-        mic.setOnClickListener(view -> {
-            if (!hasMicrophonePermission()) requestMicrophonePermission();
-            else showUpdateInfoDialog("Микрофон разрешён", "Доступ к микрофону включён. Передача голоса между участниками заработает после подключения голосового сервера.", "Понятно", null);
-        });
+        mic.setOnClickListener(view -> toggleMicrophone());
         TextView leave = pillButton("‹  Выйти", RED, Color.WHITE, 14);
         LinearLayout.LayoutParams leaveParams = new LinearLayout.LayoutParams(0, dp(54), 1f);
         leaveParams.leftMargin = dp(10);
         controls.addView(leave, leaveParams);
-        leave.setOnClickListener(view -> { joinedRoomId = null; renderPage(); });
+        leave.setOnClickListener(view -> leaveVoiceRoom());
         page.addView(controls);
         TextView notice = text("Голосовая связь между телефонами ещё не подключена.", 10, MUTED, false);
         notice.setGravity(Gravity.CENTER);
@@ -1270,7 +1289,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void onCityChanged() {
         rebuildAccessibleRooms();
-        if (joinedRoomId != null && !"common".equals(joinedRoomId) && !joinedRoomId.equals(cityId)) joinedRoomId = null;
+        if (joinedRoomId != null && !"common".equals(joinedRoomId) && !joinedRoomId.equals(cityId)) closeVoiceRoom();
         Toast.makeText(this, "Город: " + cityName(), Toast.LENGTH_SHORT).show();
         renderPage();
     }
@@ -1305,6 +1324,155 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             startActivity(settings);
         } catch (Exception error) {
             Toast.makeText(this, "Не удалось открыть настройки приложения", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void toggleMicrophone() {
+        if (microphoneEnabled) {
+            microphoneEnabled = false;
+            stopMicrophoneCapture();
+            playMicCue(false);
+            if (voiceWaveView != null) voiceWaveView.setActive(false);
+            renderPage();
+            return;
+        }
+        if (!hasMicrophonePermission()) {
+            requestMicrophonePermission();
+            return;
+        }
+        if (!startMicrophoneCapture()) {
+            Toast.makeText(this, "Не удалось включить микрофон. Проверьте разрешение и настройки телефона.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        microphoneEnabled = true;
+        playMicCue(true);
+        renderPage();
+    }
+
+    private boolean startMicrophoneCapture() {
+        if (!hasMicrophonePermission()) return false;
+        int minBuffer;
+        try { minBuffer = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT); }
+        catch (Exception error) { return false; }
+        if (minBuffer <= 0) return false;
+        int bufferBytes = Math.max(minBuffer, 4096);
+        AudioRecord recorder = null;
+        try {
+            recorder = new AudioRecord(MediaRecorder.AudioSource.MIC, 16000,
+                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferBytes * 2);
+            if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+                recorder.release();
+                return false;
+            }
+            recorder.startRecording();
+            if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                recorder.release();
+                return false;
+            }
+            microphoneRecorder = recorder;
+            microphoneCaptureRunning.set(true);
+            AudioRecord activeRecorder = recorder;
+            Thread meter = new Thread(() -> {
+                short[] samples = new short[Math.max(1024, bufferBytes / 2)];
+                long lastUiUpdate = 0;
+                try {
+                    while (microphoneCaptureRunning.get()) {
+                        int read = activeRecorder.read(samples, 0, samples.length);
+                        if (read < 0) break;
+                        if (read == 0) continue;
+                        double sum = 0;
+                        for (int i = 0; i < read; i++) {
+                            double value = samples[i];
+                            sum += value * value;
+                        }
+                        float rms = (float) Math.sqrt(sum / read);
+                        float level = Math.min(1f, rms / 7000f);
+                        long now = SystemClock.uptimeMillis();
+                        if (now - lastUiUpdate >= 70) {
+                            lastUiUpdate = now;
+                            handler.post(() -> {
+                                if (microphoneEnabled && microphoneRecorder == activeRecorder && voiceWaveView != null) voiceWaveView.setLevel(level);
+                            });
+                        }
+                    }
+                } catch (Exception ignored) { }
+                finally {
+                    try {
+                        if (activeRecorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) activeRecorder.stop();
+                    } catch (Exception ignored) { }
+                    try { activeRecorder.release(); } catch (Exception ignored) { }
+                    if (microphoneRecorder == activeRecorder) {
+                        microphoneRecorder = null;
+                        microphoneCaptureRunning.set(false);
+                        handler.post(() -> {
+                            if (microphoneEnabled) {
+                                microphoneEnabled = false;
+                                if (voiceWaveView != null) voiceWaveView.setActive(false);
+                                Toast.makeText(MainActivity.this, "Микрофон остановлен системой", Toast.LENGTH_SHORT).show();
+                                renderPage();
+                            }
+                        });
+                    }
+                }
+            }, "courier-microphone-meter");
+            microphoneMeterThread = meter;
+            meter.start();
+            return true;
+        } catch (Exception error) {
+            microphoneCaptureRunning.set(false);
+            microphoneRecorder = null;
+            if (recorder != null) try { recorder.release(); } catch (Exception ignored) { }
+            return false;
+        }
+    }
+
+    private void stopMicrophoneCapture() {
+        microphoneCaptureRunning.set(false);
+        AudioRecord recorder = microphoneRecorder;
+        microphoneRecorder = null;
+        microphoneMeterThread = null;
+        if (recorder != null) {
+            try {
+                if (recorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) recorder.stop();
+            } catch (Exception ignored) { }
+        }
+    }
+
+    private void closeVoiceRoom() {
+        boolean wasInRoom = joinedRoomId != null;
+        if (microphoneEnabled) microphoneEnabled = false;
+        stopMicrophoneCapture();
+        if (voiceWaveView != null) voiceWaveView.setActive(false);
+        joinedRoomId = null;
+        if (wasInRoom) playVoiceCue(false);
+    }
+
+    private void leaveVoiceRoom() {
+        closeVoiceRoom();
+        activeTab = "rooms";
+        renderPage();
+    }
+
+    private void playVoiceCue(boolean connected) {
+        playTone(connected ? ToneGenerator.TONE_PROP_ACK : ToneGenerator.TONE_PROP_NACK);
+    }
+
+    private void playMicCue(boolean enabled) {
+        playTone(enabled ? ToneGenerator.TONE_PROP_BEEP2 : ToneGenerator.TONE_PROP_BEEP);
+    }
+
+    private void playTone(int toneType) {
+        ToneGenerator tone = null;
+        try {
+            tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 65);
+            if (!tone.startTone(toneType, 110)) {
+                tone.release();
+                return;
+            }
+            ToneGenerator finishedTone = tone;
+            handler.postDelayed(finishedTone::release, 160);
+        } catch (Exception ignored) {
+            if (tone != null) try { tone.release(); } catch (Exception ignoredAgain) { }
         }
     }
 
@@ -2051,6 +2219,55 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         return view;
     }
 
+    private class VoiceWaveView extends View {
+        private final Paint wavePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean active;
+        private float level;
+        private long animationStarted = SystemClock.uptimeMillis();
+
+        VoiceWaveView(Activity context) {
+            super(context);
+            wavePaint.setStyle(Paint.Style.STROKE);
+            wavePaint.setStrokeCap(Paint.Cap.ROUND);
+        }
+
+        void setActive(boolean enabled) {
+            if (active != enabled) animationStarted = SystemClock.uptimeMillis();
+            active = enabled;
+            if (!enabled) level = 0f;
+            invalidate();
+        }
+
+        void setLevel(float value) {
+            level = Math.max(0f, Math.min(1f, value));
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float centerX = getWidth() / 2f;
+            float centerY = getHeight() / 2f;
+            float innerRadius = dp(58);
+            float outerRadius = Math.min(getWidth(), getHeight()) * .48f;
+            wavePaint.setColor(ACCENT);
+            if (active) {
+                float elapsed = (SystemClock.uptimeMillis() - animationStarted) / 1900f;
+                for (int i = 0; i < 3; i++) {
+                    float phase = (elapsed + i / 3f) % 1f;
+                    float radius = innerRadius + phase * (outerRadius - innerRadius) + level * dp(7);
+                    wavePaint.setStrokeWidth(dp(1.5f + level * 1.5f));
+                    wavePaint.setAlpha((int) (145 * (1f - phase) * (.35f + .65f * level)));
+                    canvas.drawCircle(centerX, centerY, radius, wavePaint);
+                }
+                postInvalidateDelayed(16);
+            } else {
+                wavePaint.setStrokeWidth(dp(1.5f));
+                wavePaint.setAlpha(62);
+                canvas.drawCircle(centerX, centerY, innerRadius, wavePaint);
+            }
+        }
+    }
+
     private class IconView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final String name;
@@ -2149,8 +2366,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     @Override public void onBackPressed() {
         if (joinedRoomId != null) {
-            joinedRoomId = null;
-            renderPage();
+            leaveVoiceRoom();
         } else if (!"feed".equals(activeTab)) {
             activeTab = "feed";
             renderPage();
@@ -2164,16 +2380,29 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         if (player != null && userWantsPlayback) {
             try { player.start(); handler.post(updateProgress); } catch (Exception ignored) { }
         }
+        if (microphoneWasStoppedForPause) {
+            microphoneWasStoppedForPause = false;
+            renderPage();
+        }
     }
 
     @Override protected void onPause() {
         if (player != null && player.isPlaying()) {
             try { player.pause(); userWantsPlayback = true; } catch (Exception ignored) { }
         }
+        if (microphoneEnabled) {
+            microphoneEnabled = false;
+            stopMicrophoneCapture();
+            microphoneWasStoppedForPause = true;
+            if (voiceWaveView != null) voiceWaveView.setActive(false);
+        }
         super.onPause();
     }
 
     @Override protected void onDestroy() {
+        microphoneEnabled = false;
+        stopMicrophoneCapture();
+        if (voiceWaveView != null) voiceWaveView.setActive(false);
         releasePlayer();
         ioExecutor.shutdownNow();
         super.onDestroy();
