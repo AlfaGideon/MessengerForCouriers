@@ -3,10 +3,14 @@ package ru.ekip.couriers;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
@@ -27,6 +31,7 @@ import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
+import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.text.Editable;
@@ -68,15 +73,17 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private static final int PICK_VIDEO_REQUEST = 4102;
     private static final int UPDATE_PERMISSION_REQUEST = 4103;
     private static final int UPDATE_INSTALL_REQUEST = 4104;
+    private static final int PICK_AVATAR_REQUEST = 4105;
+    private static final int MICROPHONE_PERMISSION_REQUEST = 4106;
     private static final String UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/update.json";
     private static final String UPDATE_APK_PREFIX = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/ekip-debug.apk";
-    private static final int INK = Color.rgb(16, 24, 32);
-    private static final int SURFACE = Color.rgb(27, 37, 48);
-    private static final int SURFACE_2 = Color.rgb(36, 48, 61);
-    private static final int MUTED = Color.rgb(157, 171, 184);
-    private static final int ACCENT = Color.rgb(80, 210, 192);
-    private static final int ACCENT_2 = Color.rgb(143, 161, 255);
-    private static final int RED = Color.rgb(255, 105, 125);
+    private static final int INK = Color.rgb(14, 13, 11);
+    private static final int SURFACE = Color.rgb(28, 27, 23);
+    private static final int SURFACE_2 = Color.rgb(41, 39, 32);
+    private static final int MUTED = Color.rgb(174, 169, 155);
+    private static final int ACCENT = Color.rgb(255, 207, 34);
+    private static final int ACCENT_2 = Color.rgb(255, 158, 20);
+    private static final int RED = Color.rgb(235, 89, 68);
     private static final String[] CITY_NAMES = {
             "Абакан", "Архангельск", "Астрахань", "Балаково", "Балашиха", "Барнаул", "Белгород", "Бийск", "Благовещенск", "Братск", "Брянск",
             "Великий Новгород", "Владивосток", "Владикавказ", "Владимир", "Волгоград", "Вологда", "Воронеж", "Грозный", "Дзержинск", "Домодедово",
@@ -124,6 +131,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private boolean muted = false;
     private boolean copyingVideo = false;
     private String profileName = "";
+    private String profileBio = "";
+    private String profileTelegram = "";
+    private String profileAvatarPath = "";
     private String cityId = "city:санкт-петербург";
     private String customCityName = "";
     private Dialog updateProgressDialog;
@@ -135,8 +145,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(INK);
-        getWindow().setNavigationBarColor(Color.rgb(10, 16, 22));
-        if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarDividerColor(Color.rgb(43, 58, 71));
+        getWindow().setNavigationBarColor(Color.rgb(8, 8, 7));
+        if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarDividerColor(Color.rgb(58, 53, 42));
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         getWindow().getDecorView().setSystemUiVisibility(0);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -148,6 +158,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private void loadLocalState() {
         SharedPreferences prefs = getSharedPreferences("ekip_native", MODE_PRIVATE);
         profileName = prefs.getString("profile_name", "");
+        profileBio = prefs.getString("profile_bio", "");
+        profileTelegram = prefs.getString("profile_telegram", "");
+        profileAvatarPath = prefs.getString("profile_avatar_path", "");
+        if (!profileAvatarPath.isEmpty() && !new File(profileAvatarPath).isFile()) profileAvatarPath = "";
         String saved = prefs.getString("videos", "[]");
         try {
             JSONArray array = new JSONArray(saved);
@@ -195,7 +209,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER);
         bar.setPadding(dp(7), dp(5), dp(7), dp(5));
-        bar.setBackground(round(Color.rgb(18, 28, 38), 27));
+        bar.setBackground(round(Color.rgb(20, 19, 16), 27));
         bar.setElevation(dp(10));
         bar.setClipChildren(false);
         bar.setClipToPadding(false);
@@ -212,7 +226,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 center.setGravity(Gravity.CENTER);
                 center.setTranslationY(-dp(3));
                 FrameLayout halo = new FrameLayout(this);
-                halo.setBackground(round(0x3350D2C0, 36));
+                halo.setBackground(round(0x33FFCF22, 36));
                 FrameLayout circle = new FrameLayout(this);
                 circle.setTag("voice-button");
                 circle.setContentDescription("Открыть голосовые комнаты");
@@ -282,7 +296,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             int color = selected ? ACCENT : MUTED;
             ((IconView) tab.getChildAt(0)).setTint(color);
             ((TextView) tab.getChildAt(1)).setTextColor(color);
-            tab.setBackground(ripple(round(selected ? 0x1F50D2C0 : 0x00000000, 16)));
+            tab.setBackground(ripple(round(selected ? 0x1FFFCE22 : 0x00000000, 16)));
         }
     }
 
@@ -302,7 +316,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void renderFeed() {
         FrameLayout feed = new FrameLayout(this);
-        feed.setBackgroundColor(Color.rgb(8, 9, 12));
+        feed.setBackgroundColor(Color.rgb(9, 9, 8));
         contentFrame.addView(feed, new FrameLayout.LayoutParams(-1, -1));
         if (videos.isEmpty()) {
             renderEmptyFeed(feed);
@@ -338,11 +352,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         empty.setOrientation(LinearLayout.VERTICAL);
         empty.setGravity(Gravity.CENTER);
         empty.setPadding(dp(24), dp(26), dp(24), dp(26));
-        empty.setBackground(round(Color.rgb(17, 27, 37), 28));
+        empty.setBackground(round(Color.rgb(26, 24, 20), 28));
         empty.setElevation(dp(4));
 
         FrameLayout iconTile = new FrameLayout(this);
-        iconTile.setBackground(round(0x2250D2C0, 23));
+        iconTile.setBackground(round(0x22FFCF22, 23));
         TextView plus = roundIconButton("add", ACCENT, INK, 52);
         plus.setTextSize(30);
         plus.setBackground(ripple(round(ACCENT, 20)));
@@ -363,7 +377,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
         titleParams.topMargin = dp(11);
         empty.addView(title, titleParams);
-        TextView subtitle = text("Добавь ролик с телефона — он останется только у тебя и будет доступен после перезапуска.", 13, 0xFFB4C0CA, false);
+        TextView subtitle = text("Добавь ролик с телефона — он останется только у тебя и будет доступен после перезапуска.", 13, 0xFFD1CCBF, false);
         subtitle.setGravity(Gravity.CENTER);
         subtitle.setLineSpacing(dp(4), 1f);
         LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
@@ -453,7 +467,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         side.setOrientation(LinearLayout.VERTICAL);
         side.setGravity(Gravity.CENTER_HORIZONTAL);
         side.setPadding(dp(8), dp(8), dp(8), dp(8));
-        TextView sound = roundIconButton(muted ? "mute" : "sound", 0x990D0E12, Color.WHITE, 46);
+        TextView sound = roundIconButton(muted ? "mute" : "sound", 0x990D0C09, Color.WHITE, 46);
         sound.setContentDescription(muted ? "Включить звук" : "Выключить звук");
         sound.setOnClickListener(view -> {
             muted = !muted;
@@ -461,7 +475,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             sound.setText(muted ? "×" : "♪");
         });
         side.addView(sound);
-        TextView delete = roundIconButton("more", 0x990D0E12, Color.WHITE, 46);
+        TextView delete = roundIconButton("more", 0x990D0C09, Color.WHITE, 46);
         delete.setContentDescription("Действия с видео");
         LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(46), dp(46));
         deleteParams.topMargin = dp(13);
@@ -476,7 +490,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         playback.setOrientation(LinearLayout.HORIZONTAL);
         playback.setGravity(Gravity.CENTER_VERTICAL);
         playback.setPadding(dp(15), 0, dp(15), 0);
-        playback.setBackground(round(0x66101218, 20));
+        playback.setBackground(round(0x6613110D, 20));
         TextView play = roundIconButton("pause", 0x00000000, Color.WHITE, 38);
         playOverlay = play;
         play.setOnClickListener(view -> togglePlayback());
@@ -607,6 +621,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             joinedRoomId = room.id;
             activeTab = "rooms";
             renderPage();
+            requestMicrophonePermission();
         });
         return card;
     }
@@ -642,15 +657,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout.LayoutParams stageParams = new LinearLayout.LayoutParams(-1, 0, 1f);
         stageParams.bottomMargin = dp(14);
         page.addView(stage, stageParams);
-        TextView avatar = text("Я", 35, INK, true);
-        avatar.setGravity(Gravity.CENTER);
-        avatar.setBackground(round(ACCENT, 32));
+        FrameLayout avatar = createAvatarView(dp(104));
         stage.addView(avatar, new LinearLayout.LayoutParams(dp(104), dp(104)));
         TextView self = text(profileName.isEmpty() ? "Вы" : profileName, 19, Color.WHITE, true);
         LinearLayout.LayoutParams selfParams = new LinearLayout.LayoutParams(-2, -2);
         selfParams.topMargin = dp(18);
         stage.addView(self, selfParams);
-        TextView micState = text("Микрофон не подключён", 12, MUTED, false);
+        TextView micState = text(hasMicrophonePermission() ? "Доступ к микрофону открыт" : "Нужно разрешение на микрофон", 12, hasMicrophonePermission() ? ACCENT : MUTED, true);
         LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(-2, -2);
         micParams.topMargin = dp(6);
         stage.addView(micState, micParams);
@@ -663,9 +676,12 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         LinearLayout controls = new LinearLayout(this);
         controls.setGravity(Gravity.CENTER);
-        TextView mic = pillButton("⊘  Микрофон недоступен", SURFACE_2, MUTED, 12);
-        mic.setEnabled(false);
+        TextView mic = pillButton(hasMicrophonePermission() ? "✓  Микрофон разрешён" : "Разрешить микрофон", hasMicrophonePermission() ? 0x22FFCF22 : ACCENT, hasMicrophonePermission() ? ACCENT : INK, 12);
         controls.addView(mic, new LinearLayout.LayoutParams(0, dp(54), 1f));
+        mic.setOnClickListener(view -> {
+            if (!hasMicrophonePermission()) requestMicrophonePermission();
+            else showUpdateInfoDialog("Микрофон разрешён", "Доступ к микрофону включён. Передача голоса между участниками заработает после подключения голосового сервера.", "Понятно", null);
+        });
         TextView leave = pillButton("‹  Выйти", RED, Color.WHITE, 14);
         LinearLayout.LayoutParams leaveParams = new LinearLayout.LayoutParams(0, dp(54), 1f);
         leaveParams.leftMargin = dp(10);
@@ -681,48 +697,274 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void renderProfile() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setClipToPadding(false);
         LinearLayout page = pageColumn();
-        addPageHeader(page, "Профиль", "Личные данные на этом телефоне");
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER_HORIZONTAL);
-        card.setPadding(dp(22), dp(24), dp(22), dp(22));
-        card.setBackground(round(SURFACE, 22));
-        TextView avatar = text(profileName.isEmpty() ? "?" : profileName.substring(0, 1).toUpperCase(Locale.getDefault()), 28, INK, true);
-        avatar.setGravity(Gravity.CENTER);
-        avatar.setBackground(round(ACCENT, 28));
-        card.addView(avatar, new LinearLayout.LayoutParams(dp(76), dp(76)));
-        TextView title = text(profileName.isEmpty() ? "Как к вам обращаться?" : profileName, 19, Color.WHITE, true);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
-        titleParams.topMargin = dp(15);
-        title.setGravity(Gravity.CENTER);
-        card.addView(title, titleParams);
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setText(profileName);
-        input.setHint("Ваше имя");
-        input.setTextColor(Color.WHITE);
-        input.setHintTextColor(MUTED);
-        input.setTextSize(15);
-        input.setPadding(dp(14), 0, dp(14), 0);
-        input.setBackground(round(SURFACE_2, 14));
-        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(-1, dp(52));
-        inputParams.topMargin = dp(22);
-        card.addView(input, inputParams);
-        TextView save = pillButton("Сохранить профиль", ACCENT, INK, 14);
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(50));
-        saveParams.topMargin = dp(12);
-        card.addView(save, saveParams);
+        addPageHeader(page, "Профиль", "Ваша карточка курьера");
+
+        LinearLayout preview = new LinearLayout(this);
+        preview.setOrientation(LinearLayout.HORIZONTAL);
+        preview.setGravity(Gravity.CENTER_VERTICAL);
+        preview.setPadding(dp(16), dp(16), dp(14), dp(16));
+        preview.setBackground(round(SURFACE, 23));
+        FrameLayout avatar = createAvatarView(dp(72));
+        preview.addView(avatar, new LinearLayout.LayoutParams(dp(72), dp(72)));
+        LinearLayout identity = new LinearLayout(this);
+        identity.setOrientation(LinearLayout.VERTICAL);
+        identity.setPadding(dp(13), 0, dp(8), 0);
+        TextView displayName = text(profileName.isEmpty() ? "Ваш никнейм" : profileName, 17, Color.WHITE, true);
+        displayName.setMaxLines(1);
+        displayName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        identity.addView(displayName, new LinearLayout.LayoutParams(-1, -2));
+        TextView local = text(profileBio.isEmpty() ? cityName() + " · Курьер" : profileBio, 11, MUTED, false);
+        local.setMaxLines(2);
+        LinearLayout.LayoutParams localParams = new LinearLayout.LayoutParams(-1, -2);
+        localParams.topMargin = dp(5);
+        identity.addView(local, localParams);
+        preview.addView(identity, new LinearLayout.LayoutParams(0, -2, 1f));
+        if (!profileTelegram.isEmpty()) {
+            FrameLayout telegram = new FrameLayout(this);
+            telegram.setContentDescription("Открыть Telegram");
+            telegram.setBackground(ripple(round(SURFACE_2, 17)));
+            telegram.addView(new IconView(this, "telegram", ACCENT, dp(24)), centered());
+            preview.addView(telegram, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            telegram.setOnClickListener(view -> openTelegramProfile());
+        }
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(-1, -2);
+        previewParams.topMargin = dp(15);
+        page.addView(preview, previewParams);
+
+        addSectionLabel(page, "НАСТРОИТЬ ПРОФИЛЬ");
+        LinearLayout editor = settingsCard();
+        editor.setPadding(dp(18), dp(18), dp(18), dp(18));
+        LinearLayout avatarActions = new LinearLayout(this);
+        avatarActions.setOrientation(LinearLayout.HORIZONTAL);
+        TextView chooseAvatar = pillButton(profileAvatarPath.isEmpty() ? "＋  Выбрать аватар" : "Изменить фото", SURFACE_2, ACCENT, 13);
+        avatarActions.addView(chooseAvatar, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        chooseAvatar.setOnClickListener(view -> openAvatarPicker());
+        if (!profileAvatarPath.isEmpty()) {
+            TextView removeAvatar = pillButton("Удалить", SURFACE_2, MUTED, 12);
+            LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(dp(88), dp(46));
+            removeParams.leftMargin = dp(8);
+            avatarActions.addView(removeAvatar, removeParams);
+            removeAvatar.setOnClickListener(view -> clearProfileAvatar());
+        }
+        editor.addView(avatarActions);
+
+        addInlineLabel(editor, "НИКНЕЙМ");
+        EditText nickname = profileInput("Например, КурьерПитер", profileName, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        nickname.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
+        LinearLayout.LayoutParams nicknameParams = new LinearLayout.LayoutParams(-1, dp(52));
+        nicknameParams.topMargin = dp(7);
+        editor.addView(nickname, nicknameParams);
+
+        addInlineLabel(editor, "О СЕБЕ / СТАТУС");
+        EditText bio = new EditText(this);
+        bio.setText(profileBio);
+        bio.setHint("Например, на маршруте каждый день");
+        bio.setTextColor(Color.WHITE);
+        bio.setHintTextColor(MUTED);
+        bio.setTextSize(14);
+        bio.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        bio.setMinLines(2);
+        bio.setMaxLines(3);
+        bio.setGravity(Gravity.TOP | Gravity.START);
+        bio.setPadding(dp(14), dp(12), dp(14), dp(10));
+        bio.setBackground(round(SURFACE_2, 14));
+        bio.setFilters(new InputFilter[]{new InputFilter.LengthFilter(100)});
+        LinearLayout.LayoutParams bioParams = new LinearLayout.LayoutParams(-1, dp(82));
+        bioParams.topMargin = dp(7);
+        editor.addView(bio, bioParams);
+
+        addInlineLabel(editor, "TELEGRAM");
+        EditText telegram = profileInput("@username или t.me/username", profileTelegram.isEmpty() ? "" : "@" + profileTelegram,
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        telegram.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        LinearLayout.LayoutParams telegramParams = new LinearLayout.LayoutParams(-1, dp(52));
+        telegramParams.topMargin = dp(7);
+        editor.addView(telegram, telegramParams);
+        TextView telegramHint = text("В карточке будет только значок самолётика — ссылка не показывается текстом.", 11, MUTED, false);
+        telegramHint.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2);
+        hintParams.topMargin = dp(6);
+        editor.addView(telegramHint, hintParams);
+
+        TextView save = pillButton("СОХРАНИТЬ ПРОФИЛЬ", ACCENT, INK, 13);
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(52));
+        saveParams.topMargin = dp(17);
+        editor.addView(save, saveParams);
+        TextView localInfo = text("Профиль сохранён на этом телефоне. Telegram откроется по значку самолётика.", 10, MUTED, false);
+        localInfo.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams localInfoParams = new LinearLayout.LayoutParams(-1, -2);
+        localInfoParams.topMargin = dp(11);
+        editor.addView(localInfo, localInfoParams);
         save.setOnClickListener(view -> {
-            profileName = input.getText().toString().trim();
-            getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putString("profile_name", profileName).apply();
+            String newName = nickname.getText().toString().trim().replaceAll("\\s+", " ");
+            String newTelegram = normalizeTelegramHandle(telegram.getText().toString());
+            if (newTelegram == null) {
+                telegram.setError("Введите @username или ссылку t.me/username");
+                return;
+            }
+            profileName = newName;
+            profileBio = bio.getText().toString().trim();
+            profileTelegram = newTelegram;
+            getSharedPreferences("ekip_native", MODE_PRIVATE).edit()
+                    .putString("profile_name", profileName)
+                    .putString("profile_bio", profileBio)
+                    .putString("profile_telegram", profileTelegram)
+                    .apply();
             Toast.makeText(this, "Профиль сохранён", Toast.LENGTH_SHORT).show();
             renderPage();
         });
-        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
-        cardParams.topMargin = dp(16);
-        page.addView(card, cardParams);
-        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout.LayoutParams editorParams = new LinearLayout.LayoutParams(-1, -2);
+        editorParams.topMargin = dp(4);
+        editorParams.bottomMargin = dp(20);
+        page.addView(editor, editorParams);
+        scroll.addView(page, new ScrollView.LayoutParams(-1, -2));
+        contentFrame.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void addInlineLabel(LinearLayout parent, String value) {
+        TextView label = text(value, 9, ACCENT, true);
+        label.setLetterSpacing(.1f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(18);
+        parent.addView(label, params);
+    }
+
+    private EditText profileInput(String hint, String value, int inputType) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(value);
+        input.setHint(hint);
+        input.setTextColor(Color.WHITE);
+        input.setHintTextColor(MUTED);
+        input.setTextSize(14);
+        input.setInputType(inputType);
+        input.setPadding(dp(14), 0, dp(14), 0);
+        input.setBackground(round(SURFACE_2, 14));
+        return input;
+    }
+
+    private String normalizeTelegramHandle(String value) {
+        String handle = value == null ? "" : value.trim();
+        if (handle.isEmpty()) return "";
+        if (handle.toLowerCase(Locale.ROOT).startsWith("https://") || handle.toLowerCase(Locale.ROOT).startsWith("http://")) {
+            Uri uri = Uri.parse(handle);
+            String host = uri.getHost();
+            if (host == null || !(host.equalsIgnoreCase("t.me") || host.equalsIgnoreCase("telegram.me") || host.equalsIgnoreCase("www.t.me") || host.equalsIgnoreCase("www.telegram.me"))) return null;
+            if (uri.getPathSegments().isEmpty()) return null;
+            handle = uri.getPathSegments().get(0);
+        } else {
+            handle = handle.replaceFirst("(?i)^(https?://)?(www\\.)?(t\\.me|telegram\\.me)/", "");
+            if (handle.contains("/")) handle = handle.substring(0, handle.indexOf('/'));
+            if (handle.contains("?")) handle = handle.substring(0, handle.indexOf('?'));
+            if (handle.startsWith("@")) handle = handle.substring(1);
+        }
+        return handle.matches("[A-Za-z0-9_]{5,32}") ? handle : null;
+    }
+
+    private void openTelegramProfile() {
+        if (profileTelegram.isEmpty()) return;
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/" + profileTelegram));
+            startActivity(intent);
+        } catch (Exception error) {
+            Toast.makeText(this, "Не удалось открыть Telegram", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void openAvatarPicker() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try { startActivityForResult(Intent.createChooser(intent, "Выберите аватар"), PICK_AVATAR_REQUEST); }
+        catch (Exception error) { Toast.makeText(this, "Не удалось открыть выбор изображения", Toast.LENGTH_SHORT).show(); }
+    }
+
+    private void copyProfileAvatar(Uri uri) {
+        ioExecutor.execute(() -> {
+            File temp = new File(getFilesDir(), "profile-avatar.tmp");
+            File destination = new File(getFilesDir(), "profile-avatar.img");
+            boolean saved = false;
+            try (InputStream input = getContentResolver().openInputStream(uri); FileOutputStream output = new FileOutputStream(temp)) {
+                if (input == null) throw new IllegalStateException("empty image stream");
+                byte[] buffer = new byte[16 * 1024];
+                int count;
+                long total = 0;
+                while ((count = input.read(buffer)) != -1) {
+                    total += count;
+                    if (total > 12L * 1024L * 1024L) throw new IllegalStateException("image too large");
+                    output.write(buffer, 0, count);
+                }
+                output.getFD().sync();
+                if (destination.exists() && !destination.delete()) throw new IllegalStateException("cannot replace image");
+                saved = temp.renameTo(destination);
+                if (!saved) throw new IllegalStateException("cannot save image");
+            } catch (Exception error) {
+                temp.delete();
+            }
+            final boolean result = saved;
+            handler.post(() -> {
+                if (result) {
+                    profileAvatarPath = destination.getAbsolutePath();
+                    getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putString("profile_avatar_path", profileAvatarPath).apply();
+                    Toast.makeText(this, "Аватар обновлён", Toast.LENGTH_SHORT).show();
+                    renderPage();
+                } else Toast.makeText(this, "Не удалось сохранить это изображение", Toast.LENGTH_LONG).show();
+            });
+        });
+    }
+
+    private void clearProfileAvatar() {
+        if (!profileAvatarPath.isEmpty()) new File(profileAvatarPath).delete();
+        profileAvatarPath = "";
+        getSharedPreferences("ekip_native", MODE_PRIVATE).edit().remove("profile_avatar_path").apply();
+        renderPage();
+    }
+
+    private FrameLayout createAvatarView(int size) {
+        FrameLayout outer = new FrameLayout(this);
+        outer.setPadding(dp(3), dp(3), dp(3), dp(3));
+        outer.setBackground(oval(ACCENT));
+        FrameLayout inner = new FrameLayout(this);
+        inner.setBackground(oval(SURFACE_2));
+        TextView fallback = text(profileName.isEmpty() ? "К" : profileName.substring(0, 1).toUpperCase(Locale.getDefault()), 28, ACCENT, true);
+        fallback.setGravity(Gravity.CENTER);
+        inner.addView(fallback, centered());
+        File avatarFile = profileAvatarPath.isEmpty() ? null : new File(profileAvatarPath);
+        if (avatarFile != null && avatarFile.isFile()) {
+            Bitmap bitmap = decodeAvatar(avatarFile.getAbsolutePath(), size);
+            if (bitmap != null) {
+                ImageView photo = new ImageView(this);
+                photo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                photo.setImageBitmap(bitmap);
+                photo.setBackground(oval(SURFACE_2));
+                photo.setClipToOutline(true);
+                inner.addView(photo, centered());
+            }
+        }
+        FrameLayout.LayoutParams innerParams = new FrameLayout.LayoutParams(-1, -1);
+        outer.addView(inner, innerParams);
+        outer.setContentDescription("Аватар профиля");
+        return outer;
+    }
+
+    private Bitmap decodeAvatar(String path, int targetSize) {
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, bounds);
+            int sample = 1;
+            int target = Math.max(1, targetSize);
+            while (bounds.outWidth / (sample * 2) >= target && bounds.outHeight / (sample * 2) >= target) sample *= 2;
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;
+            options.inPreferredConfig = Bitmap.Config.RGB_565;
+            return BitmapFactory.decodeFile(path, options);
+        } catch (Exception ignored) { return null; }
     }
 
     private void renderSettings() {
@@ -730,7 +972,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         LinearLayout page = pageColumn();
-        addPageHeader(page, "Настройки", "Курьерка под ваш город и маршрут");
+        addPageHeader(page, "Ещё", "Профиль, город и настройки Курьерки");
 
         addSectionLabel(page, "ВАШ ГОРОД");
         LinearLayout cityCard = new LinearLayout(this);
@@ -757,9 +999,25 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         cityCardParams.topMargin = dp(9);
         page.addView(cityCard, cityCardParams);
 
-        addSectionLabel(page, "ПРОФИЛЬ");
-        LinearLayout profileCard = settingsCard();
-        addSettingRow(profileCard, "Мой профиль", profileName.isEmpty() ? "Добавить имя" : profileName, "◉", view -> {
+        addSectionLabel(page, "ВАША СТРАНИЦА");
+        LinearLayout profileCard = new LinearLayout(this);
+        profileCard.setOrientation(LinearLayout.HORIZONTAL);
+        profileCard.setGravity(Gravity.CENTER_VERTICAL);
+        profileCard.setPadding(dp(14), dp(14), dp(14), dp(14));
+        profileCard.setBackground(ripple(round(SURFACE, 21)));
+        FrameLayout settingsAvatar = createAvatarView(dp(54));
+        profileCard.addView(settingsAvatar, new LinearLayout.LayoutParams(dp(54), dp(54)));
+        LinearLayout profileCopy = new LinearLayout(this);
+        profileCopy.setOrientation(LinearLayout.VERTICAL);
+        profileCopy.setPadding(dp(12), 0, dp(8), 0);
+        profileCopy.addView(text(profileName.isEmpty() ? "Настроить профиль" : profileName, 15, Color.WHITE, true));
+        TextView profileHint = text(profileTelegram.isEmpty() ? "Фото, никнейм и Telegram" : "Фото, никнейм · Telegram подключён", 11, MUTED, false);
+        LinearLayout.LayoutParams profileHintParams = new LinearLayout.LayoutParams(-1, -2);
+        profileHintParams.topMargin = dp(5);
+        profileCopy.addView(profileHint, profileHintParams);
+        profileCard.addView(profileCopy, new LinearLayout.LayoutParams(0, -2, 1f));
+        profileCard.addView(new IconView(this, "next", ACCENT, dp(18)), new LinearLayout.LayoutParams(dp(22), dp(22)));
+        profileCard.setOnClickListener(view -> {
             activeTab = "profile";
             renderPage();
         });
@@ -876,11 +1134,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(dp(12), 0, dp(12), 0);
-            row.setBackground(ripple(round(selected ? 0x2250D2C0 : Color.TRANSPARENT, 15)));
+            row.setBackground(ripple(round(selected ? 0x22FFCF22 : Color.TRANSPARENT, 15)));
             TextView marker = text(selected ? "●" : "○", 18, selected ? ACCENT : MUTED, true);
             marker.setGravity(Gravity.CENTER);
             row.addView(marker, new LinearLayout.LayoutParams(dp(30), dp(46)));
-            TextView label = text(name, 14, selected ? Color.WHITE : 0xFFE0E6EC, selected);
+            TextView label = text(name, 14, selected ? Color.WHITE : 0xFFE6E0D4, selected);
             LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -1, 1f);
             labelParams.leftMargin = dp(9);
             row.addView(label, labelParams);
@@ -898,7 +1156,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         TextView custom = text("＋   Указать другой город", 14, ACCENT, true);
         custom.setGravity(Gravity.CENTER_VERTICAL);
         custom.setPadding(dp(12), dp(4), dp(12), dp(4));
-        custom.setBackground(ripple(round(0x1A50D2C0, 15)));
+        custom.setBackground(ripple(round(0x1AFFCF22, 15)));
         LinearLayout.LayoutParams customParams = new LinearLayout.LayoutParams(-1, dp(50));
         customParams.topMargin = dp(6);
         list.addView(custom, customParams);
@@ -985,6 +1243,39 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         renderPage();
     }
 
+    private boolean hasMicrophonePermission() {
+        return Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestMicrophonePermission() {
+        if (hasMicrophonePermission()) return;
+        SharedPreferences prefs = getSharedPreferences("ekip_native", MODE_PRIVATE);
+        boolean requestedBefore = prefs.getBoolean("microphone_permission_requested", false);
+        boolean showRationale = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO);
+        if (requestedBefore && !showRationale) {
+            showUpdateInfoDialog("Микрофон выключен", "Разрешение было отклонено. Включите доступ к микрофону в настройках Android, чтобы использовать голосовые функции.", "Открыть настройки", this::openAppPermissionSettings);
+            return;
+        }
+        if (showRationale) {
+                showUpdateInfoDialog("Нужен доступ к микрофону", "Разрешите микрофон для голосовых комнат. Курьерка не включает запись в фоне.", "Продолжить", () -> {
+                prefs.edit().putBoolean("microphone_permission_requested", true).apply();
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, MICROPHONE_PERMISSION_REQUEST);
+            });
+            return;
+        }
+        prefs.edit().putBoolean("microphone_permission_requested", true).apply();
+        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, MICROPHONE_PERMISSION_REQUEST);
+    }
+
+    private void openAppPermissionSettings() {
+        try {
+            Intent settings = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()));
+            startActivity(settings);
+        } catch (Exception error) {
+            Toast.makeText(this, "Не удалось открыть настройки приложения", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void addSettingRow(LinearLayout parent, String title, String detail, String glyph, View.OnClickListener action) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -993,7 +1284,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         row.setPadding(0, dp(12), 0, dp(12));
         TextView icon = text(glyph, 21, ACCENT, true);
         icon.setGravity(Gravity.CENTER);
-        icon.setBackground(round(0x2250D2C0, 12));
+        icon.setBackground(round(0x22FFCF22, 12));
         row.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
@@ -1011,7 +1302,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         row.setOnClickListener(action);
         parent.addView(row, new LinearLayout.LayoutParams(-1, -2));
         View divider = new View(this);
-        divider.setBackgroundColor(0xFF30414F);
+        divider.setBackgroundColor(0xFF403A2E);
         parent.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
@@ -1344,6 +1635,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_AVATAR_REQUEST && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            copyProfileAvatar(data.getData());
+            return;
+        }
         if (requestCode == UPDATE_PERMISSION_REQUEST) {
             if (Build.VERSION.SDK_INT < 26 || getPackageManager().canRequestPackageInstalls()) {
                 launchPackageInstaller(new File(getCacheDir(), "ekip-update.apk"));
@@ -1399,10 +1694,25 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         });
     }
 
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != MICROPHONE_PERMISSION_REQUEST) return;
+        boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putBoolean("microphone_permission_requested", true).apply();
+        if (granted) {
+            Toast.makeText(this, "Доступ к микрофону разрешён", Toast.LENGTH_SHORT).show();
+        } else if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+            showUpdateInfoDialog("Микрофон выключен", "Разрешите доступ в настройках Android, чтобы использовать микрофон в голосовых комнатах.", "Открыть настройки", this::openAppPermissionSettings);
+        } else {
+            Toast.makeText(this, "Без доступа к микрофону говорить в голосовой комнате нельзя", Toast.LENGTH_LONG).show();
+        }
+        if ("rooms".equals(activeTab)) renderPage();
+    }
+
     private void showLoadingOverlay() {
         FrameLayout overlay = new FrameLayout(this);
         overlay.setTag("copying_video_overlay");
-        overlay.setBackgroundColor(0xBB08090C);
+        overlay.setBackgroundColor(0xBB090806);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
@@ -1713,6 +2023,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                     path.moveTo(3, 9); path.lineTo(7, 9); path.lineTo(12, 5); path.lineTo(12, 19); path.lineTo(7, 15); path.lineTo(3, 15); path.close(); canvas.drawPath(path, paint); canvas.drawArc(new RectF(11, 6, 21, 18), -55, 110, false, paint); break;
                 case "chatline":
                     canvas.drawRoundRect(new RectF(3, 4, 21, 19), 5, 5, paint); path.moveTo(7, 19); path.lineTo(5, 22); path.lineTo(12, 19); canvas.drawPath(path, paint); break;
+                case "telegram":
+                    paint.setStyle(Paint.Style.FILL);
+                    path.moveTo(2, 10); path.lineTo(22, 2); path.lineTo(16, 22); path.lineTo(11, 15); path.lineTo(7, 19); path.lineTo(7, 13); path.close();
+                    canvas.drawPath(path, paint);
+                    paint.setColor(INK);
+                    paint.setStrokeWidth(1.2f);
+                    paint.setStyle(Paint.Style.STROKE);
+                    path.reset(); path.moveTo(7, 13); path.lineTo(15, 14); path.lineTo(22, 2); canvas.drawPath(path, paint);
+                    break;
                 default:
                     canvas.drawCircle(12, 12, 8, paint);
             }
@@ -1724,6 +2043,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
         drawable.setCornerRadius(dp(radiusDp));
+        return drawable;
+    }
+
+    private GradientDrawable oval(int color) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setShape(GradientDrawable.OVAL);
         return drawable;
     }
 

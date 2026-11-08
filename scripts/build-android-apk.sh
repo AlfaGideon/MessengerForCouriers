@@ -24,6 +24,7 @@ cat > "$BUILD/AndroidManifest.xml" <<'MANIFEST'
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="ru.ekip.couriers">
   <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="35" />
   <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
   <application android:allowBackup="false" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:label="@string/app_name" android:supportsRtl="true" android:theme="@style/AppTheme.NoActionBarLaunch" android:usesCleartextTraffic="false">
     <activity android:name="ru.ekip.couriers.MainActivity" android:exported="true" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density">
