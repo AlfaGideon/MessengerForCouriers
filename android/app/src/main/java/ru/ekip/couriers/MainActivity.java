@@ -2,9 +2,11 @@ package ru.ekip.couriers;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.PictureInPictureParams;
 import android.app.Dialog;
 import android.Manifest;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
@@ -28,12 +30,14 @@ import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaPlayer;
 import android.media.MediaRecorder;
+import android.media.audiofx.NoiseSuppressor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.util.Rational;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.InputFilter;
@@ -128,6 +132,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private MediaPlayer player;
     private Surface videoSurface;
     private volatile AudioRecord microphoneRecorder;
+    private volatile NoiseSuppressor microphoneNoiseSuppressor;
     private volatile Thread microphoneMeterThread;
     private final AtomicBoolean microphoneCaptureRunning = new AtomicBoolean(false);
     private boolean microphoneEnabled = false;
@@ -688,7 +693,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout page = pageColumn();
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(0, 0, 0, dp(18));
+        header.setPadding(0, 0, 0, dp(14));
         TextView back = roundIconButton("back", SURFACE_2, Color.WHITE, 46);
         header.addView(back, new LinearLayout.LayoutParams(dp(46), dp(46)));
         back.setOnClickListener(view -> leaveVoiceRoom());
@@ -705,38 +710,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         header.addView(count, new LinearLayout.LayoutParams(-2, dp(38)));
         page.addView(header);
 
-        LinearLayout stage = new LinearLayout(this);
-        stage.setOrientation(LinearLayout.VERTICAL);
-        stage.setGravity(Gravity.CENTER);
+        FrameLayout stage = new FrameLayout(this);
         stage.setBackground(round(SURFACE, 26));
-        stage.setPadding(dp(12), dp(12), dp(12), dp(12));
         LinearLayout.LayoutParams stageParams = new LinearLayout.LayoutParams(-1, 0, 1f);
         stageParams.bottomMargin = dp(14);
         page.addView(stage, stageParams);
         voiceArenaView = new VoiceArenaView(this);
-        stage.addView(voiceArenaView, new LinearLayout.LayoutParams(dp(210), dp(210)));
-        TextView arenaHint = text("ДЕМО-АРЕНА · ПОТЯНИ КРУЖОЧКИ", 9, ACCENT, true);
-        arenaHint.setLetterSpacing(.08f);
-        arenaHint.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams arenaHintParams = new LinearLayout.LayoutParams(-1, -2);
-        arenaHintParams.topMargin = dp(-2);
-        arenaHintParams.bottomMargin = dp(3);
-        stage.addView(arenaHint, arenaHintParams);
-        TextView self = text(profileName.isEmpty() ? "Вы" : profileName, 19, Color.WHITE, true);
-        LinearLayout.LayoutParams selfParams = new LinearLayout.LayoutParams(-2, -2);
-        selfParams.topMargin = dp(18);
-        stage.addView(self, selfParams);
-        String micStatus = microphoneEnabled ? "Микрофон включён · уровень звука локальный" : hasMicrophonePermission() ? "Микрофон выключен" : "Нужно разрешение на микрофон";
-        TextView micState = text(micStatus, 12, microphoneEnabled ? ACCENT : MUTED, true);
-        LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(-2, -2);
-        micParams.topMargin = dp(6);
-        stage.addView(micState, micParams);
-        TextView waiting = text("Вы вошли в комнату.\nДругие участники появятся после подключения голосового сервера.", 13, MUTED, false);
-        waiting.setGravity(Gravity.CENTER);
-        waiting.setLineSpacing(dp(4), 1f);
-        LinearLayout.LayoutParams waitingParams = new LinearLayout.LayoutParams(-1, -2);
-        waitingParams.topMargin = dp(18);
-        stage.addView(waiting, waitingParams);
+        stage.addView(voiceArenaView, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout controls = new LinearLayout(this);
         controls.setGravity(Gravity.CENTER);
@@ -750,11 +730,6 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         controls.addView(leave, leaveParams);
         leave.setOnClickListener(view -> leaveVoiceRoom());
         page.addView(controls);
-        TextView notice = text("Голосовая связь между телефонами ещё не подключена.", 10, MUTED, false);
-        notice.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams noticeParams = new LinearLayout.LayoutParams(-1, -2);
-        noticeParams.topMargin = dp(12);
-        page.addView(notice, noticeParams);
         contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
     }
 
@@ -1091,7 +1066,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout voiceCard = settingsCard();
         voiceCard.setPadding(dp(18), dp(17), dp(18), dp(17));
         voiceCard.addView(text("Только общий и ваш город", 15, Color.WHITE, true));
-        TextView voiceDetail = text("В списке будут две комнаты: общий канал и «" + cityName() + "». Выбор города меняет доступную городскую комнату.", 12, MUTED, false);
+        String voiceServerNote = "Голосовой сервер пока не подключён — реальные участники не отображаются. Кружки в комнате работают как локальная демо-арена; голос не передаётся другим пользователям.";
+        String noiseNote = isNoiseSuppressorAvailable() ? "Системное шумоподавление включается вместе с микрофоном." : "На этом телефоне системное шумоподавление недоступно.";
+        TextView voiceDetail = text("В списке будут две комнаты: общий канал и «" + cityName() + "». Выбор города меняет городскую комнату.\n\n" + voiceServerNote + "\n" + noiseNote, 12, MUTED, false);
         voiceDetail.setLineSpacing(dp(3), 1f);
         LinearLayout.LayoutParams voiceDetailParams = new LinearLayout.LayoutParams(-1, -2);
         voiceDetailParams.topMargin = dp(6);
@@ -1305,6 +1282,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         renderPage();
     }
 
+    private boolean isNoiseSuppressorAvailable() {
+        try { return NoiseSuppressor.isAvailable(); } catch (Exception ignored) { return false; }
+    }
+
     private boolean hasMicrophonePermission() {
         return Build.VERSION.SDK_INT < 23 || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
     }
@@ -1368,8 +1349,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         if (minBuffer <= 0) return false;
         int bufferBytes = Math.max(minBuffer, 4096);
         AudioRecord recorder = null;
+        NoiseSuppressor suppressor = null;
         try {
-            recorder = new AudioRecord(MediaRecorder.AudioSource.MIC, 16000,
+            recorder = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, 16000,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferBytes * 2);
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
                 recorder.release();
@@ -1380,9 +1362,17 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 recorder.release();
                 return false;
             }
+            if (NoiseSuppressor.isAvailable()) {
+                try {
+                    suppressor = NoiseSuppressor.create(recorder.getAudioSessionId());
+                    if (suppressor != null) suppressor.setEnabled(true);
+                } catch (Exception ignored) { suppressor = null; }
+            }
             microphoneRecorder = recorder;
+            microphoneNoiseSuppressor = suppressor;
             microphoneCaptureRunning.set(true);
             AudioRecord activeRecorder = recorder;
+            NoiseSuppressor activeSuppressor = suppressor;
             Thread meter = new Thread(() -> {
                 short[] samples = new short[Math.max(1024, bufferBytes / 2)];
                 long lastUiUpdate = 0;
@@ -1436,6 +1426,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                         if (activeRecorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) activeRecorder.stop();
                     } catch (Exception ignored) { }
                     try { activeRecorder.release(); } catch (Exception ignored) { }
+                    if (activeSuppressor != null) try { activeSuppressor.release(); } catch (Exception ignored) { }
+                    if (microphoneNoiseSuppressor == activeSuppressor) microphoneNoiseSuppressor = null;
                     if (microphoneRecorder == activeRecorder) {
                         microphoneRecorder = null;
                         microphoneCaptureRunning.set(false);
@@ -1456,6 +1448,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         } catch (Exception error) {
             microphoneCaptureRunning.set(false);
             microphoneRecorder = null;
+            microphoneNoiseSuppressor = null;
+            if (suppressor != null) try { suppressor.release(); } catch (Exception ignored) { }
             if (recorder != null) try { recorder.release(); } catch (Exception ignored) { }
             return false;
         }
@@ -2341,36 +2335,42 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
             super.onSizeChanged(width, height, oldWidth, oldHeight);
-            initBubbles(width / 2f, height / 2f);
+            initBubbles(width, height);
         }
 
-        private void initBubbles(float cx, float cy) {
+        private void initBubbles(float width, float height) {
             bubbles.clear();
+            float cx = width / 2f, cy = height / 2f;
             float radius = dp(16);
-            bubbles.add(new ArenaBubble(cx, cy - dp(60), radius, dp(42), dp(20), ACCENT_2));
-            bubbles.add(new ArenaBubble(cx + dp(59), cy + dp(36), radius, -dp(32), -dp(40), Color.rgb(216, 165, 68)));
-            bubbles.add(new ArenaBubble(cx - dp(59), cy + dp(36), radius, dp(18), -dp(47), Color.rgb(183, 151, 91)));
+            float orbitX = Math.min(width * .34f, dp(130));
+            float orbitY = Math.min(height * .32f, dp(126));
+            bubbles.add(new ArenaBubble(cx, cy - orbitY, radius, dp(42), dp(20), ACCENT_2));
+            bubbles.add(new ArenaBubble(cx + orbitX, cy + orbitY * .55f, radius, -dp(32), -dp(40), Color.rgb(216, 165, 68)));
+            bubbles.add(new ArenaBubble(cx - orbitX, cy + orbitY * .55f, radius, dp(18), -dp(47), Color.rgb(183, 151, 91)));
         }
 
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             float cx = getWidth() / 2f;
             float cy = getHeight() / 2f;
-            if (bubbles.isEmpty()) initBubbles(cx, cy);
+            if (bubbles.isEmpty()) initBubbles(getWidth(), getHeight());
             updatePhysics(cx, cy);
+            float inset = dp(8);
+            RectF arenaBounds = new RectF(inset, inset, getWidth() - inset, getHeight() - inset);
             float boundaryRadius = Math.min(getWidth(), getHeight()) * .48f;
 
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(1));
             paint.setColor(ACCENT);
             paint.setAlpha(34);
-            canvas.drawCircle(cx, cy, boundaryRadius, paint);
+            canvas.drawRoundRect(arenaBounds, dp(24), dp(24), paint);
+            arenaBounds.inset(dp(7), dp(7));
             paint.setAlpha(18);
-            canvas.drawCircle(cx, cy, boundaryRadius - dp(8), paint);
+            canvas.drawRoundRect(arenaBounds, dp(19), dp(19), paint);
 
             if (speaking) drawSpeechWaves(canvas, cx, cy, boundaryRadius);
-            drawMainAvatar(canvas, cx, cy);
             for (ArenaBubble bubble : bubbles) drawGameBubble(canvas, bubble);
+            drawMainAvatar(canvas, cx, cy);
 
             if (animating) postInvalidateOnAnimation();
         }
@@ -2413,6 +2413,12 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             paint.setAlpha(245);
             paint.setStrokeWidth(dp(2.5f));
             canvas.drawCircle(cx, cy, mainRadius, paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Color.WHITE);
+            paint.setTextSize(dp(15));
+            String displayName = profileName.isEmpty() ? "Вы" : profileName;
+            if (displayName.length() > 20) displayName = displayName.substring(0, 19) + "…";
+            canvas.drawText(displayName, cx, cy + mainRadius + dp(21), paint);
         }
 
         private void drawGameBubble(Canvas canvas, ArenaBubble bubble) {
@@ -2436,24 +2442,19 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             long now = SystemClock.uptimeMillis();
             float dt = previousFrameTime == 0 ? .016f : Math.min(.04f, Math.max(.001f, (now - previousFrameTime) / 1000f));
             previousFrameTime = now;
-            float bound = Math.min(getWidth(), getHeight()) * .48f;
+            float wall = dp(10);
+            float minX = wall, maxX = getWidth() - wall;
+            float minY = wall, maxY = getHeight() - wall;
             for (ArenaBubble bubble : bubbles) {
                 if (bubble == draggedBubble) continue;
                 bubble.x += bubble.vx * dt;
                 bubble.y += bubble.vy * dt;
-                float dx = bubble.x - cx, dy = bubble.y - cy;
-                float distance = (float) Math.sqrt(dx * dx + dy * dy);
-                float maxDistance = bound - bubble.radius;
-                if (distance > maxDistance && distance > 0) {
-                    float nx = dx / distance, ny = dy / distance;
-                    bubble.x = cx + nx * maxDistance;
-                    bubble.y = cy + ny * maxDistance;
-                    float velocityOutward = bubble.vx * nx + bubble.vy * ny;
-                    if (velocityOutward > 0) {
-                        bubble.vx -= 1.8f * velocityOutward * nx;
-                        bubble.vy -= 1.8f * velocityOutward * ny;
-                    }
-                }
+                float left = minX + bubble.radius, right = maxX - bubble.radius;
+                float top = minY + bubble.radius, bottom = maxY - bubble.radius;
+                if (bubble.x < left) { bubble.x = left; bubble.vx = Math.abs(bubble.vx); }
+                if (bubble.x > right) { bubble.x = right; bubble.vx = -Math.abs(bubble.vx); }
+                if (bubble.y < top) { bubble.y = top; bubble.vy = Math.abs(bubble.vy); }
+                if (bubble.y > bottom) { bubble.y = bottom; bubble.vy = -Math.abs(bubble.vy); }
                 bounceFromMain(bubble, cx, cy);
             }
             for (int i = 0; i < bubbles.size(); i++) {
@@ -2656,6 +2657,37 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         }
     }
 
+    private boolean shouldEnterPictureInPicture() {
+        boolean playingFeed = "feed".equals(activeTab) && player != null && userWantsPlayback;
+        boolean inVoiceRoom = "rooms".equals(activeTab) && joinedRoomId != null;
+        return playingFeed || inVoiceRoom;
+    }
+
+    private PictureInPictureParams pictureInPictureParams() {
+        float ratio = 16f / 9f;
+        if ("feed".equals(activeTab) && videoWidth > 0 && videoHeight > 0) {
+            ratio = videoWidth / (float) videoHeight;
+            if (ratio < 0.42f || ratio > 2.39f) ratio = 16f / 9f;
+        }
+        PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
+                .setAspectRatio(new Rational(Math.max(1, Math.round(ratio * 1000)), 1000));
+        if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(true);
+        return builder.build();
+    }
+
+    @Override protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (Build.VERSION.SDK_INT >= 26 && shouldEnterPictureInPicture()) {
+            try { enterPictureInPictureMode(pictureInPictureParams()); } catch (Exception ignored) { }
+        }
+    }
+
+    @Override public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        if (bottomNavigation != null) bottomNavigation.setVisibility(isInPictureInPictureMode ? View.GONE : View.VISIBLE);
+        if (isInPictureInPictureMode && player != null && player.isPlaying()) handler.post(updateProgress);
+    }
+
     @Override protected void onResume() {
         super.onResume();
         if (player != null && userWantsPlayback) {
@@ -2668,10 +2700,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     @Override protected void onPause() {
-        if (player != null && player.isPlaying()) {
+        boolean inPictureInPicture = Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode();
+        if (!inPictureInPicture && player != null && player.isPlaying()) {
             try { player.pause(); userWantsPlayback = true; } catch (Exception ignored) { }
         }
-        if (microphoneEnabled) {
+        if (!inPictureInPicture && microphoneEnabled) {
             microphoneEnabled = false;
             stopMicrophoneCapture();
             microphoneWasStoppedForPause = true;
