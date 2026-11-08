@@ -1,4 +1,4 @@
-# Экип — native Android prototype
+# Курьерка — native Android prototype
 
 The Android APK is a native Java Android application. It does not load a website, use a WebView, or depend on Vite assets at runtime. Screens, navigation, video rendering, room directory, and controls are built from Android Views.
 
@@ -12,11 +12,11 @@ The bottom navigation has a prominent round microphone action. The room list is 
 
 ## Brand and visual system
 
-The launcher, splash screen, and empty-feed hero use the square 3D raccoon courier logo based on the supplied “Курьерка Чат · Санкт-Петербург” reference. The logo artwork is kept square for the app; Android launchers may apply their own icon mask on the home screen.
+The launcher, splash screen, and empty-feed hero use the square raccoon courier logo based on the supplied “Курьерка · Санкт-Петербург” reference. The “ЧАТ” word was removed; Android launchers may still apply their own icon mask to the square artwork.
 
 ## Android updates and permanent signing
 
-The native Settings screen checks `release/update.json`, downloads the APK directly in-app, verifies its SHA-256, and hands it to Android's package installer. Android still requires the user to approve installation; silent self-installation is not permitted. The updater is enabled only when a persistent signing keystore is configured.
+The native Settings screen shows a rounded progress dialog while checking and downloading the APK, verifies its SHA-256, then hands the cached package to Android's standard installer using a read-only content URI. Android still requires the user to approve installation; silent self-installation is not permitted. The updater is enabled only when a persistent signing keystore is configured.
 
 In GitHub repository **Settings → Secrets and variables → Actions**, add these repository secrets:
 
@@ -33,7 +33,7 @@ keytool -genkeypair -v -keystore ekip-release.jks -storetype JKS \
 base64 -w0 ekip-release.jks
 ```
 
-Copy the Base64 output straight into `EKIP_SIGNING_KEYSTORE_B64` and the passwords/alias into their matching secrets. On macOS, use `base64 < ekip-release.jks | tr -d '\n'` instead of `base64 -w0`. Store a backup of `ekip-release.jks` and its passwords offline. Never commit the keystore or send it in chat; losing it makes future in-place updates impossible. After saving all four secrets, run **Actions → Build native Android APK → Run workflow**. Future workflow builds use this same key and can update over the installed app without uninstalling; Android displays its normal install confirmation.
+Copy the Base64 output straight into `EKIP_SIGNING_KEYSTORE_B64` and the passwords/alias into their matching secrets. On macOS, use `base64 < ekip-release.jks | tr -d '\n'` instead of `base64 -w0`. Store a backup of `ekip-release.jks` and its passwords offline. Never commit the keystore or send it in chat; losing it makes future in-place updates impossible. After saving all four secrets, run **Actions → Build and publish Android APK → Run workflow**. Future workflow builds use this same key and can update over the installed app without uninstalling; Android displays its normal install confirmation.
 
 The APK currently on devices was signed with a temporary CI key that was not retained. Because Android rejects updates signed by a different key, the first switch to your permanent key requires one uninstall/reinstall. Uninstalling erases app-private local video copies, so keep original videos elsewhere before this one-time migration. The agent cannot create repository Actions secrets through the connected GitHub integration in this session (GitHub returned HTTP 403); add them directly in repository settings.
 

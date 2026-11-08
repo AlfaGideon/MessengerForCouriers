@@ -21,6 +21,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <receiver android:name=".InstallStatusReceiver" android:exported="false" />
+        <provider
+            android:name=".UpdateFileProvider"
+            android:authorities="ru.ekip.couriers.updates"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

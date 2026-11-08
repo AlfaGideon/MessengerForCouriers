@@ -2,11 +2,10 @@ package ru.ekip.couriers;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.PendingIntent;
+import android.app.Dialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
-import android.content.pm.PackageInstaller;
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -16,6 +15,7 @@ import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
@@ -33,6 +33,7 @@ import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
+import android.view.Window;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -49,10 +50,8 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
@@ -65,6 +64,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity implements TextureView.SurfaceTextureListener {
     private static final int PICK_VIDEO_REQUEST = 4102;
     private static final int UPDATE_PERMISSION_REQUEST = 4103;
+    private static final int UPDATE_INSTALL_REQUEST = 4104;
     private static final String UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/update.json";
     private static final String UPDATE_APK_PREFIX = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/ekip-debug.apk";
     private static final int INK = Color.rgb(16, 24, 32);
@@ -111,6 +111,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private boolean copyingVideo = false;
     private String profileName = "";
     private String cityId = "spb";
+    private Dialog updateProgressDialog;
+    private TextView updateProgressTitle;
+    private TextView updateProgressDetail;
+    private ProgressBar updateProgressBar;
+    private boolean checkingForUpdate = false;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -357,7 +362,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
         brand.setPadding(dp(10), 0, 0, 0);
-        TextView name = text("экип", 18, Color.WHITE, true);
+        TextView name = text("Курьерка", 18, Color.WHITE, true);
         TextView sub = text("СВОИ НА МАРШРУТЕ", 8, 0xFFE0E0E4, true);
         sub.setLetterSpacing(.13f);
         brand.addView(name);
@@ -688,7 +693,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         LinearLayout page = pageColumn();
-        addPageHeader(page, "Настройки", "Экип под ваш город и маршрут");
+        addPageHeader(page, "Настройки", "Курьерка под ваш город и маршрут");
 
         addSectionLabel(page, "ВАШ ГОРОД");
         LinearLayout cityCard = new LinearLayout(this);
@@ -742,7 +747,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         LinearLayout appCard = settingsCard();
         addSettingRow(appCard, "Медиатека", videos.size() == 0 ? "Видео хранятся только на телефоне" : videos.size() + " видео · только на телефоне", "▣", view -> new AlertDialog.Builder(this).setTitle("Локальная медиатека").setMessage("Выбранные видео хранятся в приватной памяти этого телефона и не публикуются на сервере.").setPositiveButton("Понятно", null).show());
         addSettingRow(appCard, "Обновить приложение", "Проверить новую версию", "↻", view -> checkForUpdates());
-        addSettingRow(appCard, "О приложении", "Экип · Android", "ⓘ", view -> new AlertDialog.Builder(this).setTitle("Экип").setMessage("Нативное Android-приложение. Голосовые соединения между телефонами пока требуют серверной части.").setPositiveButton("Понятно", null).show());
+        addSettingRow(appCard, "О приложении", "Курьерка · Android", "ⓘ", view -> new AlertDialog.Builder(this).setTitle("Курьерка").setMessage("Нативное Android-приложение. Голосовые соединения между телефонами пока требуют серверной части.").setPositiveButton("Понятно", null).show());
         LinearLayout.LayoutParams appParams = new LinearLayout.LayoutParams(-1, -2);
         appParams.topMargin = dp(9);
         appParams.bottomMargin = dp(18);
@@ -822,42 +827,229 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void checkForUpdates() {
-        Toast.makeText(this, "Проверяем обновления…", Toast.LENGTH_SHORT).show();
+        if (checkingForUpdate) return;
+        checkingForUpdate = true;
+        showUpdateProgressDialog("Проверяем версию", "Подключаемся к серверу обновлений", true);
         ioExecutor.execute(() -> {
             try {
                 JSONObject metadata = fetchJson(UPDATE_MANIFEST_URL + "?t=" + System.currentTimeMillis());
                 if (!metadata.optBoolean("persistentSigning", false)) {
-                    throw new IllegalStateException("Постоянная подпись ещё не настроена в GitHub Actions. Обновление через приложение станет доступно после настройки ключа.");
+                    throw new IllegalStateException("Для безопасного обновления ещё не настроена постоянная подпись.");
                 }
                 long latestCode = metadata.getLong("versionCode");
                 PackageInfo installed = getPackageManager().getPackageInfo(getPackageName(), 0);
                 long installedCode = Build.VERSION.SDK_INT >= 28 ? installed.getLongVersionCode() : installed.versionCode;
                 if (latestCode <= installedCode) {
-                    handler.post(() -> Toast.makeText(this, "У вас установлена последняя версия", Toast.LENGTH_SHORT).show());
+                    handler.post(() -> {
+                        checkingForUpdate = false;
+                        dismissUpdateProgressDialog();
+                        showUpdateInfoDialog("У вас актуальная версия", "Курьерка уже обновлена.", "Понятно", null);
+                    });
                     return;
                 }
                 String apkUrl = metadata.getString("apkUrl");
                 String expectedSha = metadata.getString("sha256").toLowerCase(Locale.ROOT);
                 if (!apkUrl.startsWith(UPDATE_APK_PREFIX) || !expectedSha.matches("[0-9a-f]{64}")) {
-                    throw new IllegalStateException("Некорректные данные обновления");
+                    throw new IllegalStateException("Сервер вернул некорректные данные обновления.");
                 }
-                File apk = downloadUpdate(apkUrl, expectedSha);
                 String versionName = metadata.optString("versionName", "новая версия");
-                handler.post(() -> new AlertDialog.Builder(this)
-                        .setTitle("Доступно обновление")
-                        .setMessage("Экип " + versionName + " готов к установке. APK проверен по контрольной сумме. Android попросит подтвердить установку.")
-                        .setNegativeButton("Позже", null)
-                        .setPositiveButton("Установить", (dialog, which) -> requestUpdateInstallPermission(apk))
-                        .show());
+                handler.post(() -> setUpdateProgressStage("Скачиваем Курьерку " + versionName, "Подготавливаем безопасную загрузку", true));
+                File apk = downloadUpdate(apkUrl, expectedSha, (downloaded, total) -> handler.post(() -> updateDownloadProgress(downloaded, total)));
+                handler.post(() -> {
+                    checkingForUpdate = false;
+                    dismissUpdateProgressDialog();
+                    showUpdateReadyDialog(apk, versionName);
+                });
             } catch (Exception error) {
-                String message = error.getMessage() == null ? "Не удалось проверить обновление" : error.getMessage();
-                handler.post(() -> new AlertDialog.Builder(this)
-                        .setTitle("Обновление недоступно")
-                        .setMessage(message)
-                        .setPositiveButton("Понятно", null)
-                        .show());
+                String message = error.getMessage() == null ? "Проверьте соединение и попробуйте ещё раз." : error.getMessage();
+                handler.post(() -> {
+                    checkingForUpdate = false;
+                    dismissUpdateProgressDialog();
+                    showUpdateInfoDialog("Не удалось проверить обновление", message, "Понятно", null);
+                });
             }
         });
+    }
+
+    private void showUpdateProgressDialog(String title, String detail, boolean indeterminate) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(22), dp(22), dp(22), dp(20));
+        card.setBackground(round(SURFACE, 26));
+        TextView brand = text("КУРЬЕРКА  ·  ОБНОВЛЕНИЕ", 10, ACCENT, true);
+        brand.setLetterSpacing(.1f);
+        card.addView(brand);
+        updateProgressTitle = text(title, 19, Color.WHITE, true);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
+        titleParams.topMargin = dp(10);
+        card.addView(updateProgressTitle, titleParams);
+        updateProgressDetail = text(detail, 12, MUTED, false);
+        updateProgressDetail.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
+        detailParams.topMargin = dp(6);
+        detailParams.bottomMargin = dp(17);
+        card.addView(updateProgressDetail, detailParams);
+        updateProgressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        updateProgressBar.setMax(100);
+        updateProgressBar.setIndeterminate(indeterminate);
+        updateProgressBar.setIndeterminateTintList(ColorStateList.valueOf(ACCENT));
+        updateProgressBar.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        updateProgressBar.setProgressBackgroundTintList(ColorStateList.valueOf(SURFACE_2));
+        card.addView(updateProgressBar, new LinearLayout.LayoutParams(-1, dp(6)));
+        updateProgressDialog = new Dialog(this);
+        updateProgressDialog.setContentView(card);
+        updateProgressDialog.setCancelable(false);
+        updateProgressDialog.show();
+        styleDialogWindow(updateProgressDialog);
+    }
+
+    private void setUpdateProgressStage(String title, String detail, boolean indeterminate) {
+        if (updateProgressTitle == null || updateProgressDetail == null || updateProgressBar == null) return;
+        updateProgressTitle.setText(title);
+        updateProgressDetail.setText(detail);
+        updateProgressBar.setIndeterminate(indeterminate);
+        if (!indeterminate) updateProgressBar.setProgress(0);
+    }
+
+    private void updateDownloadProgress(long downloaded, long total) {
+        if (updateProgressBar == null || updateProgressDetail == null) return;
+        if (total > 0) {
+            updateProgressBar.setIndeterminate(false);
+            updateProgressBar.setProgress((int) Math.min(100, downloaded * 100 / total));
+            updateProgressDetail.setText(formatBytes(downloaded) + " из " + formatBytes(total));
+        } else {
+            updateProgressBar.setIndeterminate(true);
+            updateProgressDetail.setText("Загружено " + formatBytes(downloaded));
+        }
+    }
+
+    private String formatBytes(long value) {
+        if (value < 1024L * 1024L) return Math.max(1, value / 1024L) + " КБ";
+        return String.format(Locale.getDefault(), "%.1f МБ", value / (1024f * 1024f));
+    }
+
+    private void dismissUpdateProgressDialog() {
+        if (updateProgressDialog != null) {
+            try { updateProgressDialog.dismiss(); } catch (Exception ignored) { }
+        }
+        updateProgressDialog = null;
+        updateProgressTitle = null;
+        updateProgressDetail = null;
+        updateProgressBar = null;
+    }
+
+    private void showUpdateReadyDialog(File apk, String versionName) {
+        LinearLayout card = updateDialogCard("ОБНОВЛЕНИЕ ГОТОВО", "Курьерка " + versionName,
+                "Файл загружен и проверен. Android попросит подтвердить установку.");
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        TextView later = pillButton("Позже", SURFACE_2, Color.WHITE, 13);
+        TextView install = pillButton("Установить", ACCENT, INK, 13);
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        buttons.addView(later, buttonParams);
+        LinearLayout.LayoutParams installParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        installParams.leftMargin = dp(10);
+        buttons.addView(install, installParams);
+        LinearLayout.LayoutParams buttonsParams = new LinearLayout.LayoutParams(-1, -2);
+        buttonsParams.topMargin = dp(20);
+        card.addView(buttons, buttonsParams);
+        Dialog dialog = createRoundedDialog(card);
+        later.setOnClickListener(view -> dialog.dismiss());
+        install.setOnClickListener(view -> {
+            dialog.dismiss();
+            requestUpdateInstallPermission(apk);
+        });
+    }
+
+    private LinearLayout updateDialogCard(String eyebrow, String title, String message) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(22), dp(22), dp(22), dp(20));
+        card.setBackground(round(SURFACE, 26));
+        TextView label = text(eyebrow, 10, ACCENT, true);
+        label.setLetterSpacing(.1f);
+        card.addView(label);
+        TextView heading = text(title, 19, Color.WHITE, true);
+        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, -2);
+        headingParams.topMargin = dp(10);
+        card.addView(heading, headingParams);
+        TextView detail = text(message, 13, MUTED, false);
+        detail.setLineSpacing(dp(4), 1f);
+        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
+        detailParams.topMargin = dp(7);
+        card.addView(detail, detailParams);
+        return card;
+    }
+
+    private void showUpdateInfoDialog(String title, String message, String buttonText, Runnable action) {
+        LinearLayout card = updateDialogCard("КУРЬЕРКА", title, message);
+        TextView button = pillButton(buttonText, ACCENT, INK, 13);
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(-1, dp(48));
+        buttonParams.topMargin = dp(20);
+        card.addView(button, buttonParams);
+        Dialog dialog = createRoundedDialog(card);
+        button.setOnClickListener(view -> {
+            dialog.dismiss();
+            if (action != null) action.run();
+        });
+    }
+
+    private Dialog createRoundedDialog(LinearLayout card) {
+        Dialog dialog = new Dialog(this);
+        dialog.setContentView(card);
+        dialog.setCancelable(true);
+        dialog.show();
+        styleDialogWindow(dialog);
+        return dialog;
+    }
+
+    private void styleDialogWindow(Dialog dialog) {
+        Window window = dialog.getWindow();
+        if (window == null) return;
+        window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        int width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(36), dp(390));
+        window.setLayout(Math.max(dp(280), width), WindowManager.LayoutParams.WRAP_CONTENT);
+        window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        WindowManager.LayoutParams attributes = window.getAttributes();
+        attributes.dimAmount = .48f;
+        window.setAttributes(attributes);
+    }
+
+    private void requestUpdateInstallPermission(File apk) {
+        if (apk == null || !apk.isFile()) {
+            showUpdateInfoDialog("Файл не найден", "Скачайте обновление ещё раз.", "Понятно", null);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            showUpdateInfoDialog("Разрешите установку", "Android один раз попросит разрешить Курьерке устанавливать обновления. После этого вернитесь в приложение.", "Открыть настройки", () -> {
+                try {
+                    Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName()));
+                    startActivityForResult(settings, UPDATE_PERMISSION_REQUEST);
+                } catch (Exception error) {
+                    showUpdateInfoDialog("Не удалось открыть настройки", "Разрешите установку APK для Курьерки в настройках Android.", "Понятно", null);
+                }
+            });
+            return;
+        }
+        launchPackageInstaller(apk);
+    }
+
+    private void launchPackageInstaller(File apk) {
+        if (apk == null || !apk.isFile()) {
+            showUpdateInfoDialog("Файл не найден", "Проверьте обновление ещё раз.", "Понятно", null);
+            return;
+        }
+        try {
+            Uri packageUri = Uri.parse("content://ru.ekip.couriers.updates/ekip-update.apk");
+            Intent installer = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+            installer.setDataAndType(packageUri, "application/vnd.android.package-archive");
+            installer.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            installer.putExtra(Intent.EXTRA_RETURN_RESULT, true);
+            startActivityForResult(installer, UPDATE_INSTALL_REQUEST);
+        } catch (Exception error) {
+            String message = error.getMessage() == null ? "Не удалось открыть установщик Android." : error.getMessage();
+            showUpdateInfoDialog("Не удалось установить", message, "Понятно", null);
+        }
     }
 
     private JSONObject fetchJson(String address) throws Exception {
@@ -879,11 +1071,18 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         }
     }
 
-    private File downloadUpdate(String address, String expectedSha) throws Exception {
+    private File downloadUpdate(String address, String expectedSha, UpdateDownloadListener listener) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
         connection.setConnectTimeout(15000);
         connection.setReadTimeout(30000);
         connection.setUseCaches(false);
+        connection.setInstanceFollowRedirects(true);
+        int responseCode = connection.getResponseCode();
+        if (responseCode < 200 || responseCode >= 300) {
+            connection.disconnect();
+            throw new IllegalStateException("Сервер не отдал APK (HTTP " + responseCode + ").");
+        }
+        long expectedLength = connection.getContentLengthLong();
         File apk = new File(getCacheDir(), "ekip-update.apk");
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(apk)) {
@@ -892,11 +1091,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             long total = 0;
             while ((count = input.read(buffer)) != -1) {
                 total += count;
-                if (total > 100L * 1024L * 1024L) throw new IllegalStateException("Размер APK превышает допустимый лимит");
+                if (total > 100L * 1024L * 1024L) throw new IllegalStateException("Размер APK превышает допустимый лимит.");
                 digest.update(buffer, 0, count);
                 output.write(buffer, 0, count);
+                if (listener != null) listener.onProgress(total, expectedLength);
             }
             output.getFD().sync();
+        } catch (Exception error) {
+            apk.delete();
+            throw error;
         } finally {
             connection.disconnect();
         }
@@ -904,51 +1107,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         for (byte value : digest.digest()) actualSha.append(String.format(Locale.ROOT, "%02x", value & 0xff));
         if (!expectedSha.equals(actualSha.toString())) {
             apk.delete();
-            throw new IllegalStateException("Контрольная сумма APK не совпала; установка отменена");
+            throw new IllegalStateException("Контрольная сумма APK не совпала; установка отменена.");
         }
         return apk;
-    }
-
-    private void requestUpdateInstallPermission(File apk) {
-        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
-            try {
-                Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName()));
-                startActivityForResult(settings, UPDATE_PERMISSION_REQUEST);
-            } catch (Exception error) {
-                Toast.makeText(this, "Разрешите установку APK для Экип в настройках Android", Toast.LENGTH_LONG).show();
-            }
-            return;
-        }
-        installDownloadedUpdate(apk);
-    }
-
-    private void installDownloadedUpdate(File apk) {
-        if (apk == null || !apk.isFile()) {
-            Toast.makeText(this, "Файл обновления не найден. Проверьте обновление ещё раз.", Toast.LENGTH_LONG).show();
-            return;
-        }
-        try {
-            PackageInstaller installer = getPackageManager().getPackageInstaller();
-            PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
-            params.setAppPackageName(getPackageName());
-            params.setSize(apk.length());
-            int sessionId = installer.createSession(params);
-            try (PackageInstaller.Session session = installer.openSession(sessionId);
-                 InputStream input = new FileInputStream(apk);
-                 OutputStream output = session.openWrite("base.apk", 0, apk.length())) {
-                byte[] buffer = new byte[64 * 1024];
-                int count;
-                while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
-                session.fsync(output);
-                Intent status = new Intent(this, InstallStatusReceiver.class).setAction("ru.ekip.couriers.UPDATE_INSTALL_STATUS");
-                PendingIntent callback = PendingIntent.getBroadcast(this, sessionId, status,
-                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-                session.commit(callback.getIntentSender());
-            }
-            Toast.makeText(this, "Передано установщику Android. Подтвердите обновление на экране.", Toast.LENGTH_LONG).show();
-        } catch (Exception error) {
-            Toast.makeText(this, "Не удалось запустить установку обновления", Toast.LENGTH_LONG).show();
-        }
     }
 
     private LinearLayout pageColumn() {
@@ -995,10 +1156,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == UPDATE_PERMISSION_REQUEST) {
             if (Build.VERSION.SDK_INT < 26 || getPackageManager().canRequestPackageInstalls()) {
-                installDownloadedUpdate(new File(getCacheDir(), "ekip-update.apk"));
+                launchPackageInstaller(new File(getCacheDir(), "ekip-update.apk"));
             } else {
-                Toast.makeText(this, "Без разрешения Android не сможет установить обновление", Toast.LENGTH_LONG).show();
+                showUpdateInfoDialog("Разрешение не включено", "Без этого разрешения Android не позволит Курьерке открыть установщик.", "Понятно", null);
             }
+            return;
+        }
+        if (requestCode == UPDATE_INSTALL_REQUEST) {
+            if (resultCode == RESULT_OK) showUpdateInfoDialog("Обновление установлено", "Курьерка обновлена.", "Готово", null);
+            else if (resultCode == RESULT_CANCELED) showUpdateInfoDialog("Установка не завершена", "Установщик Android был закрыт или отменён.", "Понятно", null);
             return;
         }
         if (requestCode != PICK_VIDEO_REQUEST || resultCode != RESULT_OK || data == null || data.getData() == null) return;
@@ -1387,6 +1553,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         releasePlayer();
         ioExecutor.shutdownNow();
         super.onDestroy();
+    }
+
+    private interface UpdateDownloadListener {
+        void onProgress(long downloaded, long total);
     }
 
     private static class VideoItem {

@@ -32,7 +32,7 @@ cat > "$BUILD/AndroidManifest.xml" <<'MANIFEST'
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
-    <receiver android:name="ru.ekip.couriers.InstallStatusReceiver" android:exported="false" />
+    <provider android:name="ru.ekip.couriers.UpdateFileProvider" android:authorities="ru.ekip.couriers.updates" android:exported="false" android:grantUriPermissions="true" />
   </application>
 </manifest>
 MANIFEST
