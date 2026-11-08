@@ -7,6 +7,7 @@ on:
       - arena/52ee8420-messengerforcouriers
     paths:
       - 'src/**'
+      - 'scripts/**'
       - 'public/**'
       - 'android/**'
       - 'package.json'

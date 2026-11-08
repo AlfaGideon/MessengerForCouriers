@@ -1,37 +1,24 @@
 # Экип
 
-Mobile-first Android/Web application shell for a courier community. First install starts with an empty media library; no sample courier photos, posts, chats, or rooms are seeded.
+Android-first local courier media app. A fresh install opens an empty video library. No sample posts or courier photos are bundled.
 
-## Run locally
+## Video upload and persistence
 
-```bash
-npm ci
-npm run dev
-```
+The Android file picker opens the phone's video library. A selected video and its optional caption are stored as a Blob in IndexedDB inside the app's WebView origin. The app restores the media after it is closed and reopened, plays it in the library, and allows local deletion. Storage is private to that installation; clearing app data or uninstalling the app removes those files.
 
-Production web build:
+This is real on-device persistence, not a cloud upload. There is no hosted backend or account system in this repository, so the saved video is not visible to other couriers. Shared feeds, chat delivery, and real voice rooms require a deployed API, accounts/database, media storage, and a WebRTC signalling service; these screens intentionally start empty instead of showing fake users or demo rooms.
 
-```bash
-npm run build
-```
+## Build the APK
 
-## Video storage
+The Android shell is a native WebView with a system video picker and the app's own yellow bird launcher icon. The APK build script uses Android SDK tools directly, so it does not need to download a Gradle distribution.
 
-The video picker accepts video files from the phone/gallery. It saves the selected video blob and caption to IndexedDB inside the app's WebView origin, restores saved items after restart, plays them in the feed, and supports deleting them. This is **on-device storage only**: the file is not uploaded to a cloud server and cannot be seen by other users. Removing the app/clearing app data removes its local videos.
-
-## Android APK
-
-The Capacitor Android project is in `android/` (`ru.ekip.couriers`). To build a debug APK with Android Studio/JDK 21 and Android SDK 36 installed:
+Requirements: Node.js 22, JDK 21, Android SDK platform 36 and build-tools 36.0.0.
 
 ```bash
 npm ci
 npm run android:apk
 ```
 
-The output path is `android/app/build/outputs/apk/debug/app-debug.apk`.
+Output: `android/app/build/outputs/apk/debug/app-debug.apk`.
 
-A GitHub Actions workflow at `.github/workflows/android-apk.yml` builds the APK on the current Arena branch and publishes it as a downloadable workflow artifact.
-
-## Product limitations
-
-There is no backend service or account system in this repository. Therefore uploaded videos are private to the device; cross-user feeds, real messaging, server-backed rooms, and live voice/WebRTC are not enabled. Those require a deployed API, user/authentication model, media storage, database, and voice signalling service. This build does not claim those features are live.
+The workflow `.github/workflows/android-apk.yml` builds and uploads the debug APK artifact on pushes to the Arena branch.
