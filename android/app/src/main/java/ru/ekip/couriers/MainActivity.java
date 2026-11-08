@@ -29,7 +29,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
-import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -63,7 +62,9 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -169,7 +170,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 JSONObject object = array.getJSONObject(i);
                 String path = object.optString("path", "");
                 File file = new File(path);
-                if (file.isFile()) videos.add(new VideoItem(path, object.optString("name", file.getName()), object.optLong("date", file.lastModified())));
+                String title = object.optString("title", object.optString("caption", "")).trim();
+                if (title.isEmpty()) title = "Моё видео";
+                if (file.isFile()) videos.add(new VideoItem(path, title, object.optLong("date", file.lastModified())));
             }
         } catch (Exception ignored) { }
         if (videos.size() > 0) currentVideoIndex = Math.max(0, Math.min(prefs.getInt("video_index", 0), videos.size() - 1));
@@ -442,24 +445,53 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void addFeedVideoDetails(FrameLayout feed) {
+        VideoItem video = videos.get(currentVideoIndex);
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
         info.setPadding(dp(18), 0, dp(84), dp(16));
-        TextView badge = text("●  МОЯ МЕДИАТЕКА", 10, ACCENT, true);
-        badge.setLetterSpacing(.08f);
-        info.addView(badge);
-        TextView title = text(videos.get(currentVideoIndex).name, 16, Color.WHITE, true);
-        title.setMaxLines(2);
+
+        LinearLayout uploader = new LinearLayout(this);
+        uploader.setOrientation(LinearLayout.HORIZONTAL);
+        uploader.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout avatar = createAvatarView(dp(38));
+        avatar.setContentDescription("Открыть профиль " + (profileName.isEmpty() ? "Курьер" : profileName));
+        uploader.addView(avatar, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        LinearLayout authorDetails = new LinearLayout(this);
+        authorDetails.setOrientation(LinearLayout.VERTICAL);
+        authorDetails.setPadding(dp(10), 0, 0, 0);
+        TextView author = text(profileName.isEmpty() ? "Курьер" : profileName, 13, Color.WHITE, true);
+        authorDetails.addView(author);
+        TextView uploadedAt = text(formatUploadTime(video.date), 10, 0xFFD1CCBF, false);
+        LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-1, -2);
+        dateParams.topMargin = dp(3);
+        authorDetails.addView(uploadedAt, dateParams);
+        uploader.addView(authorDetails, new LinearLayout.LayoutParams(0, -2, 1f));
+        View.OnClickListener openProfile = view -> openCurrentProfile();
+        avatar.setOnClickListener(openProfile);
+        authorDetails.setOnClickListener(openProfile);
+        uploader.setContentDescription("Автор видео. Открыть профиль");
+        info.addView(uploader);
+
+        TextView title = text(video.title, 15, Color.WHITE, false);
+        title.setMaxLines(4);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        title.setLineSpacing(dp(2), 1f);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
-        titleParams.topMargin = dp(8);
+        titleParams.topMargin = dp(9);
         info.addView(title, titleParams);
-        TextView local = text("Сохранено на этом телефоне", 11, 0xFFE0E0E4, false);
-        LinearLayout.LayoutParams localParams = new LinearLayout.LayoutParams(-1, -2);
-        localParams.topMargin = dp(5);
-        info.addView(local, localParams);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.START);
         params.bottomMargin = dp(104);
         feed.addView(info, params);
+    }
+
+    private String formatUploadTime(long timestamp) {
+        return new SimpleDateFormat("d MMMM, HH:mm", new Locale("ru", "RU")).format(new Date(timestamp));
+    }
+
+    private void openCurrentProfile() {
+        joinedRoomId = null;
+        activeTab = "profile";
+        renderPage();
     }
 
     private void addFeedControls(FrameLayout feed) {
@@ -1653,8 +1685,69 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             return;
         }
         if (requestCode != PICK_VIDEO_REQUEST || resultCode != RESULT_OK || data == null || data.getData() == null) return;
-        Uri uri = data.getData();
-        String name = queryDisplayName(uri);
+        promptVideoTitle(data.getData());
+    }
+
+    private void promptVideoTitle(Uri uri) {
+        LinearLayout card = updateDialogCard("НОВОЕ ВИДЕО", "Добавьте подпись", "Название обязательно. Можно добавить хэштеги — до 200 символов.");
+        EditText titleInput = new EditText(this);
+        titleInput.setSingleLine(true);
+        titleInput.setTextSize(15);
+        titleInput.setTextColor(Color.WHITE);
+        titleInput.setHintTextColor(MUTED);
+        titleInput.setHint("Напишите название видео");
+        titleInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        titleInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(200)});
+        titleInput.setPadding(dp(14), 0, dp(14), 0);
+        titleInput.setBackground(round(SURFACE_2, 14));
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(-1, dp(52));
+        inputParams.topMargin = dp(16);
+        card.addView(titleInput, inputParams);
+        TextView count = text("0 / 200", 10, MUTED, false);
+        count.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams countParams = new LinearLayout.LayoutParams(-1, dp(24));
+        card.addView(count, countParams);
+
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        TextView cancel = pillButton("Отмена", SURFACE_2, Color.WHITE, 13);
+        TextView upload = pillButton("Добавить видео", ACCENT, INK, 13);
+        upload.setEnabled(false);
+        upload.setAlpha(.45f);
+        buttons.addView(cancel, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        LinearLayout.LayoutParams uploadParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        uploadParams.leftMargin = dp(9);
+        buttons.addView(upload, uploadParams);
+        LinearLayout.LayoutParams buttonsParams = new LinearLayout.LayoutParams(-1, -2);
+        buttonsParams.topMargin = dp(10);
+        card.addView(buttons, buttonsParams);
+
+        titleInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int countValue) {
+                count.setText(value.length() + " / 200");
+                boolean valid = !value.toString().trim().isEmpty();
+                upload.setEnabled(valid);
+                upload.setAlpha(valid ? 1f : .45f);
+            }
+            @Override public void afterTextChanged(Editable value) { }
+        });
+        Dialog dialog = createRoundedDialog(card);
+        cancel.setOnClickListener(view -> dialog.dismiss());
+        upload.setOnClickListener(view -> {
+            String title = titleInput.getText().toString().trim().replaceAll("\\s+", " ");
+            if (title.isEmpty()) {
+                titleInput.setError("Название обязательно");
+                return;
+            }
+            dialog.dismiss();
+            startVideoImport(uri, title);
+        });
+    }
+
+    private void startVideoImport(Uri uri, String title) {
+        final String videoTitle = title;
+        final long uploadedAt = System.currentTimeMillis();
         copyingVideo = true;
         showLoadingOverlay();
         ioExecutor.execute(() -> {
@@ -1676,12 +1769,12 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 }
                 File finalOutput = output;
                 handler.post(() -> {
-                    videos.add(0, new VideoItem(finalOutput.getAbsolutePath(), name, System.currentTimeMillis()));
+                    videos.add(0, new VideoItem(finalOutput.getAbsolutePath(), videoTitle, uploadedAt));
                     currentVideoIndex = 0;
                     persistVideos();
                     copyingVideo = false;
                     renderPage();
-                    Toast.makeText(this, "Видео добавлено в медиатеку", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Видео добавлено", Toast.LENGTH_SHORT).show();
                 });
             } catch (Exception error) {
                 if (output != null) output.delete();
@@ -1734,24 +1827,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         if (overlay != null) contentFrame.removeView(overlay);
     }
 
-    private String queryDisplayName(Uri uri) {
-        String name = "Видео";
-        try (android.database.Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                String value = cursor.getString(0);
-                if (value != null && !value.trim().isEmpty()) name = value;
-            }
-        } catch (Exception ignored) { }
-        return name;
-    }
-
     private void persistVideos() {
         JSONArray array = new JSONArray();
         for (VideoItem item : videos) {
             JSONObject object = new JSONObject();
             try {
                 object.put("path", item.path);
-                object.put("name", item.name);
+                object.put("title", item.title);
                 object.put("date", item.date);
                 array.put(object);
             } catch (Exception ignored) { }
@@ -1764,7 +1846,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         VideoItem item = videos.get(currentVideoIndex);
         new AlertDialog.Builder(this)
                 .setTitle("Удалить видео?")
-                .setMessage("«" + item.name + "» будет удалено с этого устройства.")
+                .setMessage("«" + item.title + "» будет удалено с этого устройства.")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Удалить", (dialog, which) -> {
                     new File(item.path).delete();
@@ -2103,9 +2185,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private static class VideoItem {
         final String path;
-        final String name;
+        final String title;
         final long date;
-        VideoItem(String path, String name, long date) { this.path = path; this.name = name; this.date = date; }
+        VideoItem(String path, String title, long date) { this.path = path; this.title = title; this.date = date; }
     }
 
     private static class RoomItem {
