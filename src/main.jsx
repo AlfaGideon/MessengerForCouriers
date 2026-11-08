@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowUpRight, Bell, Bookmark, Check, ChevronDown, ChevronRight,
   CircleHelp, CloudDownload, Compass, FileVideo, HardDrive, Headphones, Heart, Home, ImagePlus, MapPin, MessageCircle,
-  Mic, MicOff, MoreHorizontal, Plus, Search, Send, Settings, Share2, ShieldCheck,
-  RefreshCw, Radio, SlidersHorizontal, Sparkles, ThumbsUp, Trash2, Users, Video, Volume2, X, Zap
+  Mic, MicOff, MoreHorizontal, Pause, Play, Plus, Search, Send, Settings, Share2, ShieldCheck,
+  RefreshCw, Radio, SlidersHorizontal, Sparkles, ThumbsUp, Trash2, Users, Video, Volume2, VolumeX, X, Zap
 } from 'lucide-react';
 import './style.css';
 import { deleteSavedVideo, listSavedVideos, saveVideo } from './storage.js';
@@ -192,13 +192,55 @@ function App() {
   </div>;
 }
 
+function formatVideoTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.floor(seconds % 60).toString().padStart(2, '0');
+  return `${minutes}:${remainder}`;
+}
+
+function SavedVideoPlayer({ video }) {
+  const player = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const togglePlayback = () => {
+    const element = player.current;
+    if (!element) return;
+    if (element.paused) element.play().catch(() => {});
+    else element.pause();
+  };
+  const toggleMute = () => {
+    const element = player.current;
+    if (!element) return;
+    element.muted = !element.muted;
+    setMuted(element.muted);
+  };
+  return <div className={`video-player-shell ${playing ? 'video-is-playing' : ''}`}>
+    <video ref={player} className="saved-video-player" playsInline preload="metadata" src={video.url}
+      onClick={togglePlayback} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
+      onTimeUpdate={event => setTime(event.currentTarget.currentTime)}
+      onLoadedMetadata={event => setDuration(event.currentTarget.duration || 0)}
+      onEnded={() => setPlaying(false)} />
+    {!playing && <button className="video-big-play" onClick={togglePlayback} aria-label="Воспроизвести видео"><Play size={25} fill="currentColor"/></button>}
+    <div className="video-controls" onClick={event => event.stopPropagation()}>
+      <button className="video-control-button" onClick={togglePlayback} aria-label={playing ? 'Пауза' : 'Воспроизвести'}>{playing ? <Pause size={17} fill="currentColor"/> : <Play size={17} fill="currentColor"/>}</button>
+      <span className="video-current-time">{formatVideoTime(time)}</span>
+      <input className="video-seek" type="range" min="0" max={duration || 0} step="0.1" value={Math.min(time, duration || 0)} onChange={event => { if (player.current) player.current.currentTime = Number(event.target.value); }} aria-label="Перемотать видео" style={{ '--seek-progress': `${duration ? (time / duration) * 100 : 0}%` }}/>
+      <span className="video-duration">{formatVideoTime(duration)}</span>
+      <button className="video-control-button video-volume" onClick={toggleMute} aria-label={muted ? 'Включить звук' : 'Выключить звук'}>{muted ? <VolumeX size={17}/> : <Volume2 size={17}/>}</button>
+    </div>
+  </div>;
+}
+
 function FeedPage({ videos, videosLoading, onDeleteVideo, setShowUpload }) {
   return <div className="feed-layout">
     <div className="feed-column">
       <div className="welcome-row"><div><div className="eyebrow"><span className="welcome-dot"/> ЭКИП · МОЯ МЕДИАТЕКА</div><h1>Мои видео</h1><p>Добавьте ролик с телефона — он останется на устройстве.</p></div><button className="button-primary create-video" onClick={() => setShowUpload(true)}><Plus size={17}/> Добавить видео</button></div>
       <div className="route-status-strip"><span className="route-status-icon"><HardDrive size={16}/></span><span className="route-status-copy"><b>Локальное хранение</b><small><i/> Видео сохраняются в памяти приложения</small></span><span className="local-only-badge">ТОЛЬКО ВАМ</span></div>
       <div className="feed-filter-row"><div className="feed-tabs"><button className="selected">Медиатека <span className="video-count">{videos.length}</span></button></div><span className="local-feed-hint"><HardDrive size={13}/> Без облачной публикации</span></div>
-      {videosLoading ? <div className="empty-feed loading-feed"><div className="storage-spinner"/><b>Проверяю сохранённые видео…</b></div> : videos.length === 0 ? <section className="empty-feed"><div className="empty-feed-art"><div className="empty-feed-orbit orbit-one"/><div className="empty-feed-orbit orbit-two"/><div className="empty-feed-icon"><FileVideo size={31}/></div></div><div className="eyebrow">ВАША МЕДИАТЕКА</div><h2>Здесь пока пусто</h2><p>Выберите видео из галереи телефона. Оно будет сохранено в приложении и останется доступно после перезапуска.</p><button className="button-primary empty-upload-button" onClick={() => setShowUpload(true)}><Video size={17}/> Выбрать видео</button><div className="local-privacy-note"><ShieldCheck size={15}/> Файл хранится только на этом устройстве</div></section> : <div className="saved-video-list">{videos.map(video => <article className="saved-video-card" key={video.id}><video className="saved-video-player" controls playsInline preload="metadata" src={video.url}/><div className="saved-video-copy"><div className="saved-video-meta"><span className="saved-video-badge"><HardDrive size={12}/> НА УСТРОЙСТВЕ</span><button className="saved-video-delete" aria-label="Удалить видео" onClick={() => { if (window.confirm('Удалить видео с этого устройства?')) onDeleteVideo(video); }}><Trash2 size={16}/></button></div><h2>{video.caption || video.name}</h2><p>{video.name} · {formatBytes(video.size)} · {new Date(video.createdAt).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })}</p></div></article>)}</div>}
+      {videosLoading ? <div className="empty-feed loading-feed"><div className="storage-spinner"/><b>Проверяю сохранённые видео…</b></div> : videos.length === 0 ? <section className="empty-feed"><div className="empty-feed-art"><div className="empty-feed-orbit orbit-one"/><div className="empty-feed-orbit orbit-two"/><div className="empty-feed-icon"><FileVideo size={31}/></div></div><div className="eyebrow">ВАША МЕДИАТЕКА</div><h2>Здесь пока пусто</h2><p>Выберите видео из галереи телефона. Оно будет сохранено в приложении и останется доступно после перезапуска.</p><button className="button-primary empty-upload-button" onClick={() => setShowUpload(true)}><Video size={17}/> Выбрать видео</button><div className="local-privacy-note"><ShieldCheck size={15}/> Файл хранится только на этом устройстве</div></section> : <div className="saved-video-list">{videos.map(video => <article className="saved-video-card" key={video.id}><SavedVideoPlayer video={video}/><div className="saved-video-copy"><div className="saved-video-meta"><span className="saved-video-badge"><HardDrive size={12}/> МОЯ МЕДИАТЕКА</span><button className="saved-video-delete" aria-label="Удалить видео" onClick={() => { if (window.confirm('Удалить видео с этого устройства?')) onDeleteVideo(video); }}><Trash2 size={16}/></button></div><h2>{video.caption || video.name}</h2><p>{formatBytes(video.size)} · {new Date(video.createdAt).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })}</p></div></article>)}</div>}
     </div>
   </div>;
 }
