@@ -139,10 +139,11 @@ public class MainActivity extends Activity {
                 boolean success = false;
                 File staging = new File(getFilesDir(), "ota-staging");
                 try {
-                    URL url = new URL(updateUrl);
-                    if (!"https".equals(url.getProtocol()) || !"raw.githubusercontent.com".equals(url.getHost()) || !url.getPath().equals("/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/web-update.zip")) {
+                    URL manifestUrl = new URL(updateUrl);
+                    if (!"https".equals(manifestUrl.getProtocol()) || !"raw.githubusercontent.com".equals(manifestUrl.getHost()) || !manifestUrl.getPath().equals("/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/web-update.zip")) {
                         throw new IOException("Update URL is not trusted");
                     }
+                    URL url = new URL(updateUrl + "?t=" + System.currentTimeMillis());
                     HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                     connection.setConnectTimeout(15000);
                     connection.setReadTimeout(30000);
