@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowUpRight, Bell, Bookmark, Check, ChevronDown, ChevronRight,
-  CircleHelp, CloudDownload, Compass, FileVideo, HardDrive, Headphones, Heart, Home, ImagePlus, MapPin, MessageCircle,
+  CircleHelp, CloudDownload, Compass, FileVideo, HardDrive, Headphones, Heart, Home, MapPin, MessageCircle,
   Mic, MicOff, MoreHorizontal, Pause, Play, Plus, Search, Send, Settings, Share2, ShieldCheck,
   RefreshCw, Radio, SlidersHorizontal, Sparkles, ThumbsUp, Trash2, Users, Video, Volume2, VolumeX, X, Zap
 } from 'lucide-react';
@@ -31,7 +31,8 @@ function App() {
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
   const [following, setFollowing] = useState(false);
-  const [showUpload, setShowUpload] = useState(false);
+  const videoPickerRef = useRef(null);
+  const [savingVideo, setSavingVideo] = useState(false);
   const [toast, setToast] = useState('');
   const [activeChat, setActiveChat] = useState(0);
   const [chatMessage, setChatMessage] = useState('');
@@ -60,8 +61,7 @@ function App() {
     const item = await saveVideo(file, caption);
     const video = { ...item, url: URL.createObjectURL(item.blob) };
     setVideos(current => [video, ...current]);
-    setShowUpload(false);
-    notify('Видео сохранено на этом телефоне');
+    notify('Видео добавлено в медиатеку на телефоне');
   };
 
   const removeLocalVideo = async (video) => {
@@ -121,6 +121,22 @@ function App() {
     return () => { delete window.__ekipOtaResult; };
   }, []);
 
+  const chooseVideo = () => { if (!savingVideo) videoPickerRef.current?.click(); };
+  const handleVideoPicked = async (event) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    setSavingVideo(true);
+    try {
+      await publishLocalVideo({ file, caption: '' });
+    } catch (error) {
+      notify(error.message || 'Не удалось сохранить видео');
+    } finally {
+      setSavingVideo(false);
+    }
+  };
+
   const navigate = (next) => { setPage(next); setToast(''); };
   const nav = [
     { id: 'feed', label: 'Лента', icon: Home },
@@ -173,7 +189,7 @@ function App() {
       </header>
 
       <div className="page-content">
-        {page === 'feed' && <FeedPage {...{ filter, setFilter, videos, videosLoading, onDeleteVideo: removeLocalVideo, setShowUpload, notify }} />}
+        {page === 'feed' && <FeedPage {...{ filter, setFilter, videos, videosLoading, onDeleteVideo: removeLocalVideo, onChooseVideo: chooseVideo, savingVideo }} />}
         {page === 'chats' && <ChatsPage {...{ activeChat, setActiveChat, search, setSearch, sentMessages, chatMessage, setChatMessage, sendMessage, notify }} />}
         {page === 'rooms' && <RoomsPage joinedRoom={joinedRoom} onJoinRoom={joinRoom} onLeaveRoom={leaveRoom} />}
         {page === 'profile' && <ProfilePage {...{ navigate, notify }} />}
@@ -187,7 +203,7 @@ function App() {
 
     <aside className="rightbar"><div className="local-storage-panel"><div className="empty-module-icon"><HardDrive size={24}/></div><span className="eyebrow">ЛОКАЛЬНЫЙ РЕЖИМ</span><h3>Ваши видео — на вашем устройстве</h3><p>Файлы остаются в хранилище приложения. Они не загружаются в общую сеть и не видны другим пользователям.</p></div></aside>
 
-    {showUpload && <UploadModal onClose={() => setShowUpload(false)} onDone={publishLocalVideo} />}
+    <input ref={videoPickerRef} className="native-video-picker" type="file" accept="video/*" onChange={handleVideoPicked} aria-label="Выбрать видео на телефоне" />
     {toast && <div className="toast"><span className="toast-check"><Check size={14}/></span>{toast}</div>}
   </div>;
 }
@@ -249,13 +265,13 @@ function SavedVideoPlayer({ video }) {
   </div>;
 }
 
-function FeedPage({ videos, videosLoading, onDeleteVideo, setShowUpload }) {
+function FeedPage({ videos, videosLoading, onDeleteVideo, onChooseVideo, savingVideo }) {
   return <div className="feed-layout">
     <div className="feed-column">
-      <div className="welcome-row"><div><div className="eyebrow"><span className="welcome-dot"/> ЭКИП · МОЯ МЕДИАТЕКА</div><h1>Мои видео</h1><p>Добавьте ролик с телефона — он останется на устройстве.</p></div><button className="button-primary create-video" onClick={() => setShowUpload(true)}><Plus size={17}/> Добавить видео</button></div>
+      <div className="welcome-row"><div><div className="eyebrow"><span className="welcome-dot"/> ЭКИП · МОЯ МЕДИАТЕКА</div><h1>Мои видео</h1><p>Добавьте ролик с телефона — он останется на устройстве.</p></div>{videos.length > 0 && <button className="button-primary create-video" onClick={onChooseVideo} disabled={savingVideo} aria-label="Добавить видео" title="Добавить видео"><Plus size={17}/><span>{savingVideo ? 'Сохраняю…' : 'Добавить видео'}</span></button>}</div>
       <div className="route-status-strip"><span className="route-status-icon"><HardDrive size={16}/></span><span className="route-status-copy"><b>Локальное хранение</b><small><i/> Видео сохраняются в памяти приложения</small></span><span className="local-only-badge">ТОЛЬКО ВАМ</span></div>
       <div className="feed-filter-row"><div className="feed-tabs"><button className="selected">Медиатека <span className="video-count">{videos.length}</span></button></div><span className="local-feed-hint"><HardDrive size={13}/> Без облачной публикации</span></div>
-      {videosLoading ? <div className="empty-feed loading-feed"><div className="storage-spinner"/><b>Проверяю сохранённые видео…</b></div> : videos.length === 0 ? <section className="empty-feed"><div className="empty-feed-art"><div className="empty-feed-orbit orbit-one"/><div className="empty-feed-orbit orbit-two"/><div className="empty-feed-icon"><FileVideo size={31}/></div></div><div className="eyebrow">ВАША МЕДИАТЕКА</div><h2>Здесь пока пусто</h2><p>Выберите видео из галереи телефона. Оно будет сохранено в приложении и останется доступно после перезапуска.</p><button className="button-primary empty-upload-button" onClick={() => setShowUpload(true)}><Video size={17}/> Выбрать видео</button><div className="local-privacy-note"><ShieldCheck size={15}/> Файл хранится только на этом устройстве</div></section> : <div className="saved-video-list shorts-feed">{videos.map(video => <article className="saved-video-card shorts-card" key={video.id}><SavedVideoPlayer video={video}/><div className="saved-video-copy"><div className="saved-video-meta"><span className="saved-video-badge"><HardDrive size={12}/> МОЯ МЕДИАТЕКА</span><button className="saved-video-delete" aria-label="Удалить видео" onClick={() => { if (window.confirm('Удалить видео с этого устройства?')) onDeleteVideo(video); }}><Trash2 size={16}/></button></div><h2>{video.caption || video.name}</h2><p>{formatBytes(video.size)} · {new Date(video.createdAt).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })}</p></div></article>)}</div>}
+      {videosLoading ? <div className="empty-feed loading-feed"><div className="storage-spinner"/><b>Проверяю сохранённые видео…</b></div> : videos.length === 0 ? <section className="empty-feed"><div className="empty-feed-art"><div className="empty-feed-orbit orbit-one"/><div className="empty-feed-orbit orbit-two"/><div className="empty-feed-icon"><FileVideo size={31}/></div></div><div className="eyebrow">ВАША МЕДИАТЕКА</div><h2>Здесь пока пусто</h2><p>Выберите ролик — он сразу добавится в медиатеку и останется на этом телефоне.</p><button className="button-primary empty-upload-button" onClick={onChooseVideo} disabled={savingVideo}><Video size={17}/> {savingVideo ? 'Сохраняю видео…' : 'Выбрать видео'}</button><div className="local-privacy-note"><ShieldCheck size={15}/> Файл хранится только на этом устройстве</div></section> : <div className="saved-video-list shorts-feed">{videos.map(video => <article className="saved-video-card shorts-card" key={video.id}><SavedVideoPlayer video={video}/><div className="saved-video-copy"><div className="saved-video-meta"><span className="saved-video-badge"><HardDrive size={12}/> МОЯ МЕДИАТЕКА</span><button className="saved-video-delete" aria-label="Удалить видео" onClick={() => { if (window.confirm('Удалить видео с этого устройства?')) onDeleteVideo(video); }}><Trash2 size={16}/></button></div><h2>{video.caption || video.name}</h2><p>{formatBytes(video.size)} · {new Date(video.createdAt).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })}</p></div></article>)}</div>}
     </div>
   </div>;
 }
@@ -303,46 +319,6 @@ function SettingsPage({ settings, setSettings, notify, otaStatus, updateInfo, on
     { key:'location', icon:MapPin, title:'Показывать город', desc:'Чтобы находить курьеров рядом' },
   ];
   return <div className="settings-page"><div className="page-heading"><div><div className="eyebrow">ПОД ТВОЙ РИТМ</div><h1>Настройки<span>.</span></h1><p>Настрой экип так, как удобно тебе.</p></div></div><div className="settings-layout"><div className="settings-menu"><button className="selected"><Settings size={17}/> Основные</button><button onClick={() => notify('Настройки приватности')}><ShieldCheck size={17}/> Приватность</button><button onClick={() => notify('Настройки аккаунта')}><Users size={17}/> Аккаунт</button><button onClick={() => notify('Справка появится скоро')}><CircleHelp size={17}/> Помощь</button></div><section className="settings-card"><div className="settings-card-head"><div><h2>Основные</h2><p>Общие настройки приложения</p></div></div>{rows.map(({key,icon:Icon,title,desc})=><div className="setting-row" key={key}><div className="setting-icon"><Icon size={18}/></div><div className="setting-copy"><b>{title}</b><span>{desc}</span></div><button className={`toggle ${settings[key]?'on':''}`} onClick={() => { setSettings({...settings,[key]:!settings[key]}); notify(`${title}: ${settings[key]?'выключено':'включено'}`); }} aria-label={`Переключить ${title}`}><i/></button></div>)}<div className="settings-divider"/><section className="ota-card"><div className="ota-card-heading"><span className="setting-icon"><CloudDownload size={18}/></span><div><b>Обновление приложения</b><span>Загружать свежую версию по воздуху</span></div></div><div className={`ota-status ota-${otaStatus}`} role="status">{otaStatus === 'checking' ? 'Проверяю обновления…' : otaStatus === 'downloading' ? 'Загружаю и устанавливаю…' : otaStatus === 'available' ? `Доступно обновление ${updateInfo?.webVersion ?? ''}` : otaStatus === 'current' ? 'Установлена актуальная версия' : otaStatus === 'error' ? 'Проверка не удалась. Попробуйте ещё раз.' : otaStatus === 'native-only' ? 'Автообновление доступно в Android-приложении' : 'Проверить наличие обновлений'}</div><div className="ota-actions"><button className="button-secondary" onClick={onCheckUpdates} disabled={otaStatus === 'checking' || otaStatus === 'downloading'}><RefreshCw size={14}/> Проверить</button>{otaStatus === 'available'&&<button className="button-primary" onClick={onApplyUpdate}><CloudDownload size={14}/> Обновить</button>}</div><small>Обновляется интерфейс приложения. Для исправлений Android-части нужно установить новый APK.</small></section><button className="setting-link" onClick={() => notify('Экип · версия 1.0.0')}><span>О приложении</span><small>Версия 1.0.0</small><ChevronRight size={16}/></button><button className="setting-link" onClick={() => notify('Условия использования')}><span>Правила экипа</span><ChevronRight size={16}/></button></section></div></div>;
-}
-
-function UploadModal({ onClose, onDone }) {
-  const [file, setFile] = useState(null);
-  const [caption, setCaption] = useState('');
-  const [previewUrl, setPreviewUrl] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!file) { setPreviewUrl(''); return; }
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-
-  const submit = async () => {
-    if (!file) { setError('Сначала выберите видео из галереи.'); return; }
-    setSaving(true);
-    setError('');
-    try {
-      await onDone({ file, caption });
-    } catch (err) {
-      setError(err.message || 'Не получилось сохранить видео.');
-      setSaving(false);
-    }
-  };
-
-  return <div className="modal-backdrop" onClick={onClose}><div className="upload-modal" onClick={e=>e.stopPropagation()}>
-    <div className="modal-head"><div><span className="eyebrow">ЛОКАЛЬНОЕ СОХРАНЕНИЕ</span><h2>Добавить видео<span>.</span></h2></div><button className="icon-button" onClick={onClose} aria-label="Закрыть"><X size={19}/></button></div>
-    <p className="modal-subtitle">Выберите видео из памяти телефона. Оно сохранится в этой копии приложения и будет доступно после перезапуска.</p>
-    <label className={`upload-drop ${file?'has-file':''}`}><input type="file" accept="video/*" onChange={e=>{setFile(e.target.files?.[0]||null);setError('');}}/>
-      {file && previewUrl ? <video className="upload-preview" src={previewUrl} muted playsInline/> : <span className="upload-icon"><Video size={23}/></span>}
-      <b>{file?.name||'Выберите видео на телефоне'}</b><small>{file?`${formatBytes(file.size)} · ${file.type||'видеофайл'}`:'MP4, MOV и другие видеоформаты'}</small><span className="button-secondary upload-choose"><ImagePlus size={15}/> {file?'Выбрать другое':'Открыть галерею'}</span>
-    </label>
-    <label className="upload-caption">Подпись<textarea value={caption} onChange={e=>setCaption(e.target.value)} placeholder="Добавьте заметку к видео (необязательно)" rows="3"/></label>
-    <div className="upload-local-note"><HardDrive size={14}/> Видео останется на этом телефоне и не появится у других пользователей.</div>
-    {error&&<div className="upload-error" role="alert">{error}</div>}
-    <div className="upload-modal-actions"><button className="button-secondary" onClick={onClose} disabled={saving}>Отмена</button><button className="button-primary" onClick={submit} disabled={!file||saving}>{saving?'Сохраняю…':<><HardDrive size={16}/> Сохранить видео</>}</button></div>
-  </div></div>;
 }
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

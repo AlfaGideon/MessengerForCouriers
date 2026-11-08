@@ -314,3 +314,6 @@
   .dark-mode .mobile-nav{background:rgba(23,24,29,.97);border-color:#30323a;box-shadow:0 -8px 25px #0006}
   .dark-mode .feed-screen .empty-feed{background:#111318}
 }
+
+/* The feed's single add action opens the native picker and saves immediately. */
+.native-video-picker{position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
