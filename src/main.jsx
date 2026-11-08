@@ -37,7 +37,6 @@ function App() {
   const [activeChat, setActiveChat] = useState(0);
   const [chatMessage, setChatMessage] = useState('');
   const [sentMessages, setSentMessages] = useState([]);
-  const [muted, setMuted] = useState(false);
   const [joinedRoom, setJoinedRoom] = useState('');
   const [search, setSearch] = useState('');
   const [settings, setSettings] = useState({ notifications: true, darkMode: false, location: true });
@@ -221,6 +220,9 @@ function SavedVideoPlayer({ video }) {
   const [muted, setMuted] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const holdTimer = useRef(null);
+  const longPressReset = useRef(null);
+  const ignoreLongPressClick = useRef(false);
   useEffect(() => {
     const element = player.current;
     if (!element || !window.matchMedia('(max-width: 760px)').matches || !('IntersectionObserver' in window)) return;
@@ -234,13 +236,27 @@ function SavedVideoPlayer({ video }) {
       }
     }, { threshold: [0, 0.72, 1] });
     observer.observe(element);
-    return () => { observer.disconnect(); element.pause(); };
+    return () => { observer.disconnect(); element.pause(); clearTimeout(holdTimer.current); clearTimeout(longPressReset.current); };
   }, [video.url]);
   const togglePlayback = () => {
     const element = player.current;
     if (!element) return;
     if (element.paused) element.play().catch(() => {});
     else element.pause();
+  };
+  const startTouchHold = () => {
+    clearTimeout(holdTimer.current);
+    ignoreLongPressClick.current = false;
+    holdTimer.current = window.setTimeout(() => { ignoreLongPressClick.current = true; }, 450);
+  };
+  const endTouchHold = () => {
+    clearTimeout(holdTimer.current);
+    clearTimeout(longPressReset.current);
+    longPressReset.current = window.setTimeout(() => { ignoreLongPressClick.current = false; }, 650);
+  };
+  const handleVideoTap = () => {
+    if (ignoreLongPressClick.current) { ignoreLongPressClick.current = false; return; }
+    togglePlayback();
   };
   const toggleMute = () => {
     const element = player.current;
@@ -250,11 +266,11 @@ function SavedVideoPlayer({ video }) {
   };
   return <div className={`video-player-shell ${playing ? 'video-is-playing' : ''}`}>
     <video ref={player} className="saved-video-player" playsInline preload="metadata" src={video.url}
-      onClick={togglePlayback} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
+      onClick={handleVideoTap} onTouchStart={startTouchHold} onTouchEnd={endTouchHold} onTouchCancel={endTouchHold} onContextMenu={event => event.preventDefault()} onDragStart={event => event.preventDefault()} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
       onTimeUpdate={event => setTime(event.currentTarget.currentTime)}
       onLoadedMetadata={event => setDuration(event.currentTarget.duration || 0)}
       onEnded={() => setPlaying(false)} />
-    {!playing && <button className="video-big-play" onClick={togglePlayback} aria-label="Воспроизвести видео"><Play size={25} fill="currentColor"/></button>}
+    {!playing && <button className="video-big-play" onClick={handleVideoTap} onTouchStart={startTouchHold} onTouchEnd={endTouchHold} onContextMenu={event => event.preventDefault()} aria-label="Воспроизвести видео"><Play size={25} fill="currentColor"/></button>}
     <div className="video-controls" onClick={event => event.stopPropagation()}>
       <button className="video-control-button" onClick={togglePlayback} aria-label={playing ? 'Пауза' : 'Воспроизвести'}>{playing ? <Pause size={17} fill="currentColor"/> : <Play size={17} fill="currentColor"/>}</button>
       <span className="video-current-time">{formatVideoTime(time)}</span>
@@ -288,13 +304,39 @@ function ChatsPage() {
 }
 
 function RoomsPage({ joinedRoom, onJoinRoom, onLeaveRoom }) {
+  const micMuted = true;
   const current = rooms.find(room => room.id === joinedRoom);
+  if (current) {
+    const participants = [{ id: 'self', name: 'Вы', speaking: false, muted: micMuted }]
+      .sort((left, right) => Number(right.speaking) - Number(left.speaking));
+    return <div className="call-room-screen">
+      <header className="call-room-header">
+        <button className="call-back-button" onClick={onLeaveRoom} aria-label="Вернуться к комнатам"><ArrowLeft size={19}/></button>
+        <div><span>ГОЛОСОВАЯ КОМНАТА</span><h1>{current.title}</h1></div>
+        <span className="call-participant-count"><Users size={15}/> {participants.length}</span>
+      </header>
+      <section className="call-stage" aria-label="Участники голосовой комнаты">
+        <div className="participant-grid">
+          {participants.map(person => <article className={`participant-tile ${person.speaking ? 'participant-speaking' : ''}`} key={person.id}>
+            <div className={`participant-avatar ${person.muted ? 'participant-muted' : ''}`}>{person.name === 'Вы' ? 'Я' : person.name.slice(0, 1)}</div>
+            <span className="participant-name">{person.name}</span>
+            <span className="participant-mic-state">{person.muted ? <MicOff size={14}/> : <Mic size={14}/>} {person.muted ? 'Микрофон выключен' : 'Микрофон включён'}</span>
+          </article>)}
+        </div>
+        <div className="call-empty-note"><span className="call-status-pulse"/> Вы в комнате. Другие участники пока не подключены.</div>
+      </section>
+      <footer className="call-control-dock">
+        <button className="call-mic-button is-muted" disabled aria-label="Микрофон недоступен без голосового сервера"><span><MicOff size={21}/></span><small>Микрофон недоступен</small></button>
+        <button className="call-leave-button" onClick={onLeaveRoom}><ArrowDownLeft size={19}/> Выйти</button>
+      </footer>
+      <div className="call-backend-notice"><Headphones size={16}/><span>Передача голоса между телефонами пока не подключена. Нужен сервер голосовых комнат.</span></div>
+    </div>;
+  }
   return <div className="rooms-page">
     <div className="page-heading"><div><div className="eyebrow"><span className="live-dot"/> КОМНАТЫ ВСЕГДА ОТКРЫТЫ</div><h1>Голосовые<span>.</span></h1><p>Заходи в общую или выбери свой город.</p></div></div>
-    {current && <section className="active-room-panel"><div className={`active-room-icon ${current.tone}`}><Headphones size={25}/></div><div className="active-room-copy"><span className="room-connected-label"><i/> ОТКРЫТА НА УСТРОЙСТВЕ</span><h2>{current.title}</h2><p>Комната открыта на этом устройстве. Сейчас присутствие других участников не отображается.</p></div><button className="button-secondary" onClick={onLeaveRoom}>Выйти</button></section>}
     <div className="rooms-section-title"><div><h2>Постоянные комнаты</h2><p>Войти можно в любой момент — не нужно ждать инициатора.</p></div></div>
-    <div className="persistent-room-list">{rooms.map((room, index) => <article className={`persistent-room ${joinedRoom===room.id?'selected-room':''}`} key={room.id}><div className={`persistent-room-icon ${room.tone}`}>{room.global?<Radio size={22}/>:<MapPin size={22}/>}</div><div className="persistent-room-details"><div className="persistent-room-heading"><span className="persistent-room-type">{room.global?'ОБЩАЯ':'ГОРОДСКАЯ'}</span>{joinedRoom===room.id&&<span className="in-room-pill"><i/> ОТКРЫТА</span>}</div><h3>{room.title}</h3><p>{room.detail}</p><span className="persistent-room-status"><span className="empty-indicator"/> Постоянная комната · доступна для входа</span></div><button className={`room-enter-button ${joinedRoom===room.id?'in-room':''}`} onClick={() => onJoinRoom(room.id)}>{joinedRoom===room.id?'Открыта':'Зайти'}{joinedRoom===room.id?<Check size={15}/>:<ArrowUpRight size={15}/>}</button></article>)}</div>
-    <div className="voice-requirement-note"><Headphones size={16}/><span>Вход в комнату доступен сразу. Передача голоса между телефонами требует подключения голосового сервера.</span></div>
+    <div className="persistent-room-list">{rooms.map(room => <article className="persistent-room" key={room.id}><div className={`persistent-room-icon ${room.tone}`}>{room.global?<Radio size={22}/>:<MapPin size={22}/>}</div><div className="persistent-room-details"><div className="persistent-room-heading"><span className="persistent-room-type">{room.global?'ОБЩАЯ':'ГОРОДСКАЯ'}</span></div><h3>{room.title}</h3><p>{room.detail}</p><span className="persistent-room-status"><span className="empty-indicator"/> Комната доступна для входа</span></div><button className="room-enter-button" onClick={() => onJoinRoom(room.id)}>Зайти<ArrowUpRight size={15}/></button></article>)}</div>
+    <div className="voice-requirement-note"><Headphones size={16}/><span>Здесь пока нет подключённого голосового сервера; экран комнаты показывает только локальный вход.</span></div>
   </div>;
 }
 

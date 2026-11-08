@@ -50,6 +50,8 @@ public class MainActivity extends Activity {
 
         webView = new WebView(this);
         webView.setBackgroundColor(0xFFF2F0E7);
+        webView.setLongClickable(false);
+        webView.setOnLongClickListener(view -> true);
         webView.addJavascriptInterface(new OtaBridge(), "EkipNative");
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
