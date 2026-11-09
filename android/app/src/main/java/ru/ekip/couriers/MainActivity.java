@@ -1058,7 +1058,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         if ("Яндекс Еда".equals(value)) return R.drawable.logo_yandex_eda;
         if ("Магнит Доставка".equals(value)) return R.drawable.logo_magnit_delivery;
         if ("Купер".equals(value)) return R.drawable.logo_kuper;
-        if ("Яндекс Доставка".equals(value)) return R.drawable.logo_yandex_pro;
+        if ("Яндекс Доставка".equals(value)) return R.drawable.logo_yandex_delivery;
         if ("Самокат".equals(value)) return R.drawable.logo_samokat;
         if ("Достависта".equals(value)) return R.drawable.logo_dostavista;
         if ("Ozon".equals(value)) return R.drawable.logo_ozon;
@@ -2485,7 +2485,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         int viewWidth = textureView.getWidth();
         int viewHeight = textureView.getHeight();
         if (viewWidth <= 0 || viewHeight <= 0) return;
-        float scale = Math.max(viewWidth / (float) videoWidth, viewHeight / (float) videoHeight);
+        float scale = Math.min(viewWidth / (float) videoWidth, viewHeight / (float) videoHeight);
         float scaledWidth = videoWidth * scale;
         float scaledHeight = videoHeight * scale;
         float dx = (viewWidth - scaledWidth) / 2f;
