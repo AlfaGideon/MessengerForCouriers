@@ -2,7 +2,7 @@
 
 This service is a first network backend for the app: account registration/login, the seven chat categories shown in the Android UI, persistent plain-text chat messages, report submission, voice-room presence/mute state, and WebRTC signaling events.
 
-**It is not yet a production service and the released Android APK is not connected to it.** The app currently needs a client integration step before people can use these endpoints from inside the app. Voice signaling is included, but this process does **not** transmit or relay audio. The Android app also needs a WebRTC client (and TURN for difficult networks) before users can hear each other. Do not advertise network voice as working yet.
+**This is a prototype, not a production service.** The current Android client can register/login and exchange text messages through it; it also sends voice-room presence and mute state. The server's WebRTC signaling endpoints are only a foundation: this process does **not** transmit or relay audio, and the Android client does not yet negotiate peer audio. Do not advertise network voice as working yet.
 
 ## Run locally
 

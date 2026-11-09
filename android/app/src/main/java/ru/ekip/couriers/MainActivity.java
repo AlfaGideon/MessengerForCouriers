@@ -69,6 +69,8 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import io.socket.client.IO;
+import io.socket.client.Socket;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -77,11 +79,13 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
@@ -107,13 +111,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private static final int ACCENT_2 = Color.rgb(255, 158, 20);
     private static final int RED = Color.rgb(235, 89, 68);
     private static final String[][] CHAT_CATEGORIES = {
-            {"💸", "Заработок, бонусы и выплаты", "Вопросы о выплатах и бонусах"},
-            {"🚨", "ДТП, угоны и помощь на смене", "Ситуации на маршруте и взаимопомощь"},
-            {"📰", "Новости и слухи", "Новости курьерской работы"},
-            {"🛠️", "Байки, аренда и ремонт", "Транспорт, аренда и ремонт"},
-            {"💡", "Лайфхаки и полезные советы", "Полезный опыт на каждый день"},
-            {"🛒", "Купить, продать, обменять", "Объявления курьеров"},
-            {"🦺", "Экипировка и аксессуары", "Снаряжение для работы"}
+            {"💸", "Заработок, бонусы и выплаты", "Вопросы о выплатах и бонусах", "earnings"},
+            {"🚨", "ДТП, угоны и помощь на смене", "Ситуации на маршруте и взаимопомощь", "incidents"},
+            {"📰", "Новости и слухи", "Новости курьерской работы", "news"},
+            {"🛠️", "Байки, аренда и ремонт", "Транспорт, аренда и ремонт", "repair"},
+            {"💡", "Лайфхаки и полезные советы", "Полезный опыт на каждый день", "tips"},
+            {"🛒", "Купить, продать, обменять", "Объявления курьеров", "market"},
+            {"🦺", "Экипировка и аксессуары", "Снаряжение для работы", "gear"}
     };
     private static final String[] CITY_NAMES = {
             "Абакан", "Архангельск", "Астрахань", "Балаково", "Балашиха", "Барнаул", "Белгород", "Бийск", "Благовещенск", "Братск", "Брянск",
@@ -190,6 +194,19 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private SeekBar seekBar;
     private String activeTab = "feed";
     private String selectedChatCategory = "";
+    private boolean showChatAuth;
+    private boolean chatRegisterMode = true;
+    private boolean chatRequestRunning;
+    private String chatAuthError = "";
+    private String backendToken = "";
+    private String backendDisplayName = "";
+    private String chatJoinedCategoryId = "";
+    private Socket chatSocket;
+    private final ArrayList<JSONObject> chatMessages = new ArrayList<>();
+    private LinearLayout chatMessageList;
+    private ScrollView chatMessageScroll;
+    private TextView chatConnectionStatus;
+    private EditText chatComposer;
     private String settingsSubpage = "";
     private String joinedRoomId = null;
     private int currentVideoIndex = 0;
@@ -240,6 +257,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         profileTelegram = prefs.getString("profile_telegram", "");
         profileAvatarPath = prefs.getString("profile_avatar_path", "");
         courierService = prefs.getString("courier_service", "");
+        backendToken = prefs.getString("backend_token", "");
+        backendDisplayName = prefs.getString("backend_display_name", "");
         if (!profileAvatarPath.isEmpty() && !new File(profileAvatarPath).isFile()) profileAvatarPath = "";
         String saved = prefs.getString("videos", "[]");
         try {
@@ -401,11 +420,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         if ("feed".equals(activeTab)) renderFeed();
         else if ("rooms".equals(activeTab) && joinedRoomId != null) renderCallRoom();
         else if ("rooms".equals(activeTab)) renderRooms();
+        else if ("chats".equals(activeTab) && showChatAuth) renderChatAuthPage();
         else if ("chats".equals(activeTab) && selectedChatCategory.isEmpty()) renderChatCategories();
         else if ("chats".equals(activeTab)) renderChatCategory();
         else if ("profile".equals(activeTab)) renderProfile();
         else if ("more".equals(activeTab) && "library".equals(settingsSubpage)) renderMediaLibrary();
         else if ("more".equals(activeTab) && "about".equals(settingsSubpage)) renderAboutPage();
+        else if ("more".equals(activeTab) && "backend".equals(settingsSubpage)) renderBackendSettingsPage();
         else renderSettings();
         refreshPictureInPictureEligibility();
     }
@@ -665,6 +686,242 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         feed.addView(playback, playbackParams);
     }
 
+    private void renderChatAuthPage() {
+        LinearLayout page = pageColumn();
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("‹", 34, Color.WHITE, false);
+        back.setGravity(Gravity.CENTER);
+        back.setBackground(ripple(round(SURFACE, 16)));
+        header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        back.setOnClickListener(view -> { showChatAuth = false; selectedChatCategory = ""; renderPage(); });
+        header.addView(text("Аккаунт чатов", 22, Color.WHITE, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        page.addView(header);
+        TextView intro = text("Создайте аккаунт или войдите, чтобы обмениваться сообщениями с другими курьерами.", 13, MUTED, false);
+        intro.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams introParams = new LinearLayout.LayoutParams(-1, -2);
+        introParams.topMargin = dp(10);
+        introParams.bottomMargin = dp(16);
+        page.addView(intro, introParams);
+        LinearLayout modes = new LinearLayout(this);
+        TextView register = pillButton("Регистрация", chatRegisterMode ? ACCENT : SURFACE_2, chatRegisterMode ? INK : Color.WHITE, 13);
+        TextView login = pillButton("Войти", chatRegisterMode ? SURFACE_2 : ACCENT, chatRegisterMode ? Color.WHITE : INK, 13);
+        modes.addView(register, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        LinearLayout.LayoutParams loginParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        loginParams.leftMargin = dp(8);
+        modes.addView(login, loginParams);
+        page.addView(modes);
+        register.setOnClickListener(view -> { chatRegisterMode = true; chatAuthError = ""; renderPage(); });
+        login.setOnClickListener(view -> { chatRegisterMode = false; chatAuthError = ""; renderPage(); });
+        EditText username = profileInput("Логин (латиница и цифры)", "", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        LinearLayout.LayoutParams field = new LinearLayout.LayoutParams(-1, dp(52));
+        field.topMargin = dp(14);
+        page.addView(username, field);
+        EditText display = null;
+        if (chatRegisterMode) {
+            display = profileInput("Имя для отображения", profileName, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+            LinearLayout.LayoutParams displayParams = new LinearLayout.LayoutParams(-1, dp(52));
+            displayParams.topMargin = dp(10);
+            page.addView(display, displayParams);
+        }
+        EditText password = profileInput("Пароль · минимум 10 символов", "", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        LinearLayout.LayoutParams passwordParams = new LinearLayout.LayoutParams(-1, dp(52));
+        passwordParams.topMargin = dp(10);
+        page.addView(password, passwordParams);
+        TextView error = text(chatAuthError, 12, RED, false);
+        LinearLayout.LayoutParams errorParams = new LinearLayout.LayoutParams(-1, -2);
+        errorParams.topMargin = dp(10);
+        page.addView(error, errorParams);
+        TextView submit = pillButton(chatRequestRunning ? "Подключаемся…" : chatRegisterMode ? "Создать аккаунт" : "Войти в чаты", ACCENT, INK, 14);
+        LinearLayout.LayoutParams submitParams = new LinearLayout.LayoutParams(-1, dp(52));
+        submitParams.topMargin = dp(12);
+        page.addView(submit, submitParams);
+        submit.setEnabled(!chatRequestRunning);
+        EditText displayInput = display;
+        submit.setOnClickListener(view -> submitChatAuth(username.getText().toString(), displayInput == null ? "" : displayInput.getText().toString(), password.getText().toString()));
+        TextView server = text("Сервер: " + backendBaseUrl(), 10, MUTED, false);
+        server.setMaxLines(2);
+        LinearLayout.LayoutParams serverParams = new LinearLayout.LayoutParams(-1, -2);
+        serverParams.topMargin = dp(18);
+        page.addView(server, serverParams);
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private String backendBaseUrl() {
+        String value = getSharedPreferences("ekip_native", MODE_PRIVATE).getString("backend_url", BuildConfig.BACKEND_URL);
+        if (value == null || value.trim().isEmpty()) value = BuildConfig.BACKEND_URL;
+        value = value.trim();
+        while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
+        return value;
+    }
+
+    private JSONObject backendRequest(String method, String route, JSONObject body) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(backendBaseUrl() + route).openConnection();
+        connection.setRequestMethod(method);
+        connection.setConnectTimeout(12000);
+        connection.setReadTimeout(12000);
+        connection.setRequestProperty("Accept", "application/json");
+        if (!backendToken.isEmpty()) connection.setRequestProperty("Authorization", "Bearer " + backendToken);
+        if (body != null) {
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.getOutputStream().write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        int status = connection.getResponseCode();
+        InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        if (stream != null) {
+            byte[] buffer = new byte[4096]; int count;
+            while ((count = stream.read(buffer)) != -1) output.write(buffer, 0, count);
+            stream.close();
+        }
+        connection.disconnect();
+        JSONObject result = output.size() == 0 ? new JSONObject() : new JSONObject(output.toString("UTF-8"));
+        if (status < 200 || status >= 300) throw new java.io.IOException(result.optString("message", "Ошибка сервера: " + status));
+        return result;
+    }
+
+    private void submitChatAuth(String username, String displayName, String password) {
+        if (chatRequestRunning) return;
+        chatRequestRunning = true; chatAuthError = ""; renderPage();
+        JSONObject body = new JSONObject();
+        try { body.put("username", username.trim()); body.put("password", password); if (chatRegisterMode) body.put("displayName", displayName.trim()); }
+        catch (Exception ignored) { }
+        boolean registering = chatRegisterMode;
+        ioExecutor.execute(() -> {
+            try {
+                JSONObject response = backendRequest("POST", registering ? "/api/auth/register" : "/api/auth/login", body);
+                JSONObject user = response.getJSONObject("user");
+                handler.post(() -> {
+                    chatRequestRunning = false; backendToken = response.optString("token", "");
+                    backendDisplayName = user.optString("displayName", username);
+                    getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putString("backend_token", backendToken)
+                            .putString("backend_user_id", user.optString("id", "")).putString("backend_display_name", backendDisplayName).apply();
+                    showChatAuth = false; chatAuthError = ""; ensureChatSocket(); renderPage();
+                });
+            } catch (Exception failure) {
+                handler.post(() -> { chatRequestRunning = false; chatAuthError = failure.getMessage() == null ? "Нет связи с сервером" : failure.getMessage(); renderPage(); });
+            }
+        });
+    }
+
+    private void ensureChatSocket() {
+        if (backendToken.isEmpty()) return;
+        if (chatSocket != null) { if (!chatSocket.connected()) chatSocket.connect(); return; }
+        try {
+            IO.Options options = new IO.Options();
+            options.auth = new HashMap<>(); options.auth.put("token", backendToken);
+            options.reconnection = true; options.reconnectionAttempts = Integer.MAX_VALUE;
+            chatSocket = IO.socket(backendBaseUrl(), options);
+            chatSocket.on(Socket.EVENT_CONNECT, args -> handler.post(() -> {
+                if (chatConnectionStatus != null) chatConnectionStatus.setText("Подключено к серверу");
+                if (!selectedChatCategory.isEmpty()) joinBackendChat(selectedChatCategory);
+                if (joinedRoomId != null) emitVoiceJoin();
+            }));
+            chatSocket.on(Socket.EVENT_DISCONNECT, args -> handler.post(() -> { if (chatConnectionStatus != null) chatConnectionStatus.setText("Связь потеряна · переподключаемся…"); }));
+            chatSocket.on(Socket.EVENT_CONNECT_ERROR, args -> handler.post(() -> { if (chatConnectionStatus != null) chatConnectionStatus.setText("Нет связи с сервером"); }));
+            chatSocket.on("chat:message", args -> {
+                if (args.length > 0 && args[0] instanceof JSONObject) handler.post(() -> appendIncomingChatMessage((JSONObject) args[0]));
+            });
+            chatSocket.on("voice:mic", args -> { if (voiceArenaView != null) handler.post(voiceArenaView::invalidate); });
+            chatSocket.connect();
+        } catch (Exception failure) {
+            if (chatConnectionStatus != null) chatConnectionStatus.setText("Не удалось создать соединение с сервером");
+        }
+    }
+
+    private void emitVoiceJoin() {
+        if (chatSocket == null || !chatSocket.connected() || joinedRoomId == null) return;
+        try { chatSocket.emit("voice:join", new JSONObject().put("roomId", joinedRoomId)); }
+        catch (Exception ignored) { }
+    }
+
+    private void emitVoiceMic(boolean enabled) {
+        if (chatSocket == null || !chatSocket.connected() || joinedRoomId == null) return;
+        try { chatSocket.emit("voice:mic", new JSONObject().put("enabled", enabled)); }
+        catch (Exception ignored) { }
+    }
+
+    private String chatCategoryId(String title) {
+        for (String[] item : CHAT_CATEGORIES) if (item[1].equals(title)) return item[3];
+        return "";
+    }
+
+    private void joinBackendChat(String title) {
+        String id = chatCategoryId(title);
+        if (id.isEmpty() || chatSocket == null || !chatSocket.connected()) return;
+        if (!chatJoinedCategoryId.isEmpty() && !chatJoinedCategoryId.equals(id)) {
+            try { chatSocket.emit("chat:leave", new JSONObject().put("categoryId", chatJoinedCategoryId)); } catch (Exception ignored) { }
+        }
+        chatJoinedCategoryId = id;
+        try { chatSocket.emit("chat:join", new JSONObject().put("categoryId", id)); } catch (Exception ignored) { }
+        ioExecutor.execute(() -> {
+            try {
+                JSONObject response = backendRequest("GET", "/api/messages?category=" + id + "&limit=100", null);
+                JSONArray list = response.optJSONArray("messages");
+                handler.post(() -> {
+                    if (!"chats".equals(activeTab) || !id.equals(chatCategoryId(selectedChatCategory)) || chatMessageList == null) return;
+                    chatMessages.clear(); if (list != null) for (int i=0;i<list.length();i++) { JSONObject item=list.optJSONObject(i); if (item != null) chatMessages.add(item); }
+                    renderBackendMessages();
+                    if (chatConnectionStatus != null) chatConnectionStatus.setText("Подключено · " + chatMessages.size() + " сообщений");
+                });
+            } catch (Exception failure) { handler.post(() -> { if (chatConnectionStatus != null) chatConnectionStatus.setText("Не удалось загрузить сообщения"); }); }
+        });
+    }
+
+    private void appendIncomingChatMessage(JSONObject message) {
+        String id = message.optString("id", "");
+        if (id.isEmpty() || !message.optString("categoryId", "").equals(chatCategoryId(selectedChatCategory))) return;
+        for (JSONObject item : chatMessages) if (id.equals(item.optString("id"))) return;
+        boolean wasEmpty = chatMessages.isEmpty();
+        chatMessages.add(message);
+        if (chatMessageList != null) {
+            if (wasEmpty) chatMessageList.removeAllViews();
+            addBackendMessageView(message);
+            if (chatMessageScroll != null) chatMessageScroll.post(() -> chatMessageScroll.fullScroll(View.FOCUS_DOWN));
+        }
+    }
+
+    private void renderBackendMessages() {
+        if (chatMessageList == null) return;
+        chatMessageList.removeAllViews();
+        if (chatMessages.isEmpty()) {
+            TextView empty = text("Начните разговор в этой теме", 13, MUTED, false); empty.setGravity(Gravity.CENTER);
+            chatMessageList.addView(empty, new LinearLayout.LayoutParams(-1, dp(80)));
+        } else for (JSONObject item : chatMessages) addBackendMessageView(item);
+        if (chatMessageScroll != null) chatMessageScroll.post(() -> chatMessageScroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private void addBackendMessageView(JSONObject item) {
+        if (chatMessageList == null) return;
+        boolean own = item.optString("userId", "").equals(getSharedPreferences("ekip_native", MODE_PRIVATE).getString("backend_user_id", ""));
+        LinearLayout line = new LinearLayout(this); line.setGravity(own ? Gravity.RIGHT : Gravity.LEFT);
+        LinearLayout bubble = new LinearLayout(this); bubble.setOrientation(LinearLayout.VERTICAL); bubble.setPadding(dp(12), dp(9), dp(12), dp(9));
+        bubble.setBackground(round(own ? 0xFF6B5515 : SURFACE, 16));
+        bubble.addView(text(own ? "Вы" : item.optString("displayName", "Курьер"), 10, own ? ACCENT : ACCENT_2, true));
+        TextView body = text(item.optString("text", ""), 14, Color.WHITE, false); body.setMaxWidth(getResources().getDisplayMetrics().widthPixels - dp(112)); body.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(-2, -2); bodyParams.topMargin = dp(4); bubble.addView(body, bodyParams);
+        line.addView(bubble, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(-1, -2); lineParams.bottomMargin = dp(8); chatMessageList.addView(line, lineParams);
+    }
+
+    private void sendBackendChatMessage() {
+        if (chatComposer == null || chatRequestRunning) return;
+        String value = chatComposer.getText().toString().trim(); String id = chatCategoryId(selectedChatCategory);
+        if (value.isEmpty() || id.isEmpty()) return;
+        chatRequestRunning = true; chatComposer.setEnabled(false);
+        JSONObject body = new JSONObject(); try { body.put("categoryId", id); body.put("text", value); } catch (Exception ignored) { }
+        ioExecutor.execute(() -> {
+            try {
+                JSONObject response = backendRequest("POST", "/api/messages", body).getJSONObject("message");
+                handler.post(() -> { chatRequestRunning = false; if (chatComposer != null) { chatComposer.setEnabled(true); chatComposer.setText(""); } appendIncomingChatMessage(response); });
+            } catch (Exception failure) {
+                handler.post(() -> { chatRequestRunning = false; if (chatComposer != null) chatComposer.setEnabled(true); if (chatConnectionStatus != null) chatConnectionStatus.setText(failure.getMessage()); });
+            }
+        });
+    }
+
     private void renderChatCategories() {
         LinearLayout page = pageColumn();
         addPageHeader(page, "Чаты", "Разделы сообщества курьеров");
@@ -674,11 +931,25 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         availability.setPadding(dp(16), dp(14), dp(16), dp(14));
         availability.setBackground(round(SURFACE, 18));
         availability.addView(text("Разделы чатов", 14, Color.WHITE, true));
-        TextView status = text("Список категорий готов. Для реальной переписки нужно подключить сервер чатов.", 12, MUTED, false);
+        TextView status = text(backendToken.isEmpty() ? "Войдите или создайте аккаунт, чтобы читать и отправлять сообщения." : "Вы вошли как " + backendDisplayName + " · сообщения синхронизируются с сервером.", 12, MUTED, false);
         status.setLineSpacing(dp(3), 1f);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
         statusParams.topMargin = dp(5);
         availability.addView(status, statusParams);
+        TextView accountAction = pillButton(backendToken.isEmpty() ? "Войти или зарегистрироваться" : "Выйти", ACCENT, INK, 12);
+        LinearLayout.LayoutParams accountParams = new LinearLayout.LayoutParams(-1, dp(42));
+        accountParams.topMargin = dp(10);
+        availability.addView(accountAction, accountParams);
+        accountAction.setOnClickListener(view -> {
+            if (backendToken.isEmpty()) { chatRegisterMode = true; showChatAuth = true; }
+            else {
+                backendToken = ""; backendDisplayName = ""; chatMessages.clear();
+                getSharedPreferences("ekip_native", MODE_PRIVATE).edit().remove("backend_token").remove("backend_user_id").remove("backend_display_name").apply();
+                if (chatSocket != null) { chatSocket.disconnect(); chatSocket.close(); chatSocket = null; }
+                showChatAuth = false; selectedChatCategory = "";
+            }
+            renderPage();
+        });
         LinearLayout.LayoutParams availabilityParams = new LinearLayout.LayoutParams(-1, -2);
         availabilityParams.topMargin = dp(10);
         availabilityParams.bottomMargin = dp(16);
@@ -718,6 +989,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             row.setContentDescription(category[1] + ". Открыть раздел");
             row.setOnClickListener(view -> {
                 selectedChatCategory = category[1];
+                if (backendToken.isEmpty()) { showChatAuth = true; chatRegisterMode = true; }
+                else { showChatAuth = false; ensureChatSocket(); }
                 renderPage();
             });
         }
@@ -728,65 +1001,56 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void renderChatCategory() {
         String[] category = null;
-        for (String[] item : CHAT_CATEGORIES) {
-            if (item[1].equals(selectedChatCategory)) { category = item; break; }
-        }
-        if (category == null) {
-            selectedChatCategory = "";
-            renderChatCategories();
-            return;
-        }
+        for (String[] item : CHAT_CATEGORIES) if (item[1].equals(selectedChatCategory)) { category = item; break; }
+        if (category == null) { selectedChatCategory = ""; renderChatCategories(); return; }
+        if (backendToken.isEmpty()) { showChatAuth = true; renderChatAuthPage(); return; }
+        String categoryId = category[3];
+        if (!categoryId.equals(chatJoinedCategoryId)) chatMessages.clear();
+
         LinearLayout page = pageColumn();
         LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text("‹", 34, Color.WHITE, false);
-        back.setGravity(Gravity.CENTER);
-        back.setBackground(ripple(round(SURFACE, 16)));
-        back.setContentDescription("Назад к разделам чатов");
+        header.setOrientation(LinearLayout.HORIZONTAL); header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("‹", 34, Color.WHITE, false); back.setGravity(Gravity.CENTER);
+        back.setBackground(ripple(round(SURFACE, 16))); back.setContentDescription("Назад к разделам чатов");
         header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
         back.setOnClickListener(view -> {
-            selectedChatCategory = "";
-            renderPage();
+            if (chatSocket != null && chatSocket.connected() && !chatJoinedCategoryId.isEmpty()) {
+                try { chatSocket.emit("chat:leave", new JSONObject().put("categoryId", chatJoinedCategoryId)); } catch (Exception ignored) { }
+            }
+            chatJoinedCategoryId = ""; selectedChatCategory = ""; chatMessageList = null; chatMessageScroll = null; chatComposer = null; renderPage();
         });
-        TextView title = text(category[1], 18, Color.WHITE, true);
-        title.setMaxLines(2);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1f);
-        titleParams.leftMargin = dp(12);
-        header.addView(title, titleParams);
-        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(-1, -2);
-        headerParams.bottomMargin = dp(18);
-        page.addView(header, headerParams);
+        LinearLayout titles = new LinearLayout(this); titles.setOrientation(LinearLayout.VERTICAL); titles.setPadding(dp(12), 0, 0, 0);
+        TextView title = text(category[1], 17, Color.WHITE, true); title.setMaxLines(2); titles.addView(title);
+        TextView desc = text("Тема сообщества курьеров", 10, MUTED, false);
+        LinearLayout.LayoutParams descParams = new LinearLayout.LayoutParams(-1, -2); descParams.topMargin = dp(3); titles.addView(desc, descParams);
+        header.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f)); page.addView(header);
 
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER);
-        card.setPadding(dp(22), dp(28), dp(22), dp(28));
-        card.setBackground(round(SURFACE, 22));
-        TextView icon = text(category[0], 34, Color.WHITE, false);
-        icon.setGravity(Gravity.CENTER);
-        card.addView(icon, new LinearLayout.LayoutParams(-1, dp(48)));
-        TextView emptyTitle = text("Сообщений пока нет", 18, Color.WHITE, true);
-        emptyTitle.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams emptyTitleParams = new LinearLayout.LayoutParams(-1, -2);
-        emptyTitleParams.topMargin = dp(12);
-        card.addView(emptyTitle, emptyTitleParams);
-        TextView description = text(category[2], 13, MUTED, false);
-        description.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams descriptionParams = new LinearLayout.LayoutParams(-1, -2);
-        descriptionParams.topMargin = dp(7);
-        card.addView(description, descriptionParams);
-        TextView serverInfo = text("Чат пока не подключён к серверу. Здесь нет реальных сообщений или участников.", 12, MUTED, false);
-        serverInfo.setGravity(Gravity.CENTER);
-        serverInfo.setLineSpacing(dp(3), 1f);
-        LinearLayout.LayoutParams serverInfoParams = new LinearLayout.LayoutParams(-1, -2);
-        serverInfoParams.topMargin = dp(16);
-        card.addView(serverInfo, serverInfoParams);
-        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        cardParams.topMargin = dp(8);
-        cardParams.bottomMargin = dp(12);
-        page.addView(card, cardParams);
+        chatConnectionStatus = text("Подключаемся к серверу…", 10, MUTED, false);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2); statusParams.topMargin = dp(9); statusParams.bottomMargin = dp(8);
+        page.addView(chatConnectionStatus, statusParams);
+        chatMessageScroll = createAppScrollView();
+        chatMessageList = new LinearLayout(this); chatMessageList.setOrientation(LinearLayout.VERTICAL);
+        chatMessageScroll.addView(chatMessageList, new ScrollView.LayoutParams(-1, -2));
+        page.addView(chatMessageScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        LinearLayout composerRow = new LinearLayout(this); composerRow.setOrientation(LinearLayout.HORIZONTAL); composerRow.setGravity(Gravity.CENTER_VERTICAL);
+        chatComposer = profileInput("Сообщение…", "", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        chatComposer.setSingleLine(false); chatComposer.setMaxLines(4);
+        composerRow.addView(chatComposer, new LinearLayout.LayoutParams(0, dp(50), 1f));
+        TextView send = pillButton("Отправить", ACCENT, INK, 12);
+        LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(dp(96), dp(50)); sendParams.leftMargin = dp(8);
+        composerRow.addView(send, sendParams);
+        send.setOnClickListener(view -> sendBackendChatMessage());
+        chatComposer.setOnEditorActionListener((field, actionId, event) -> {
+            if (event != null && event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER && !event.isShiftPressed()) { sendBackendChatMessage(); return true; }
+            return false;
+        });
+        LinearLayout.LayoutParams composerParams = new LinearLayout.LayoutParams(-1, -2); composerParams.topMargin = dp(8);
+        page.addView(composerRow, composerParams);
         contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        renderBackendMessages();
+        ensureChatSocket();
+        if (chatSocket != null && chatSocket.connected()) joinBackendChat(selectedChatCategory);
     }
 
     private void renderEmptyPage(String title, String message, String icon) {
@@ -949,6 +1213,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         leave.setOnClickListener(view -> leaveVoiceRoom());
         page.addView(controls);
         contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
+        if (!backendToken.isEmpty()) {
+            ensureChatSocket();
+            if (chatSocket != null && chatSocket.connected()) emitVoiceJoin();
+        }
     }
 
     private void renderProfile() {
@@ -1452,6 +1720,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             renderPage();
         });
         addSettingRow(appCard, "Обновить приложение", "Проверить новую версию", "↻", view -> checkForUpdates());
+        addSettingRow(appCard, "Сервер сообщества", backendBaseUrl(), "⇄", view -> {
+            settingsSubpage = "backend";
+            renderPage();
+        });
         addSettingRow(appCard, "О приложении", "Курьерка · Android", "ⓘ", view -> {
             settingsSubpage = "about";
             renderPage();
@@ -1632,6 +1904,41 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         scroll.addView(body, new ScrollView.LayoutParams(-1, -2));
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void renderBackendSettingsPage() {
+        LinearLayout page = pageColumn();
+        addSettingsSubpageHeader(page, "Сервер сообщества", "Адрес для чатов и голосовых комнат");
+        TextView detail = text("Укажите публичный HTTPS-адрес вашего backend. После смены адреса войдите в аккаунт на новом сервере заново.", 13, MUTED, false);
+        detail.setLineSpacing(dp(3), 1f);
+        page.addView(detail);
+        EditText address = profileInput("https://api.example.com", backendBaseUrl(), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        LinearLayout.LayoutParams addressParams = new LinearLayout.LayoutParams(-1, dp(52)); addressParams.topMargin = dp(16);
+        page.addView(address, addressParams);
+        TextView save = pillButton("Сохранить адрес сервера", ACCENT, INK, 14);
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(-1, dp(52)); saveParams.topMargin = dp(12);
+        page.addView(save, saveParams);
+        save.setOnClickListener(view -> {
+            String value = address.getText().toString().trim();
+            Uri uri = Uri.parse(value);
+            if (uri.getHost() == null || !"https".equalsIgnoreCase(uri.getScheme())) {
+                Toast.makeText(this, "Нужен публичный HTTPS-адрес сервера", Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (chatSocket != null) { chatSocket.disconnect(); chatSocket.close(); chatSocket = null; }
+            chatSocket = null; backendToken = ""; backendDisplayName = ""; selectedChatCategory = "";
+            getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putString("backend_url", value)
+                    .remove("backend_token").remove("backend_user_id").remove("backend_display_name").apply();
+            settingsSubpage = "";
+            Toast.makeText(this, "Адрес сервера сохранён. Войдите в чаты заново.", Toast.LENGTH_LONG).show();
+            renderPage();
+        });
+        LinearLayout info = settingsCard();
+        TextView explanation = text("Текущий тестовый адрес зависит от временного сервера Arena и не подходит для постоянного распространения APK. Для постоянной работы разверните backend на своём хосте и укажите его адрес здесь.", 12, MUTED, false);
+        explanation.setLineSpacing(dp(3), 1f); info.addView(explanation);
+        LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(-1, -2); infoParams.topMargin = dp(18);
+        page.addView(info, infoParams);
         contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
     }
 
@@ -1889,6 +2196,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private void toggleMicrophone() {
         if (microphoneEnabled) {
             microphoneEnabled = false;
+            emitVoiceMic(false);
             stopMicrophoneCapture();
             playMicCue(false);
             if (voiceArenaView != null) {
@@ -1910,6 +2218,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             return;
         }
         microphoneEnabled = true;
+        emitVoiceMic(true);
         if (voiceArenaView != null) voiceArenaView.updateMicrophoneStatus();
         playMicCue(true);
         if (isInPictureInPicture()) {
@@ -2052,6 +2361,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void closeVoiceRoom() {
         boolean wasInRoom = joinedRoomId != null;
+        if (chatSocket != null && chatSocket.connected() && wasInRoom) chatSocket.emit("voice:leave");
         if (microphoneEnabled) microphoneEnabled = false;
         stopMicrophoneCapture();
         if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
@@ -3354,6 +3664,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     @Override public void onBackPressed() {
         if (joinedRoomId != null) {
             leaveVoiceRoom();
+        } else if (showChatAuth && "chats".equals(activeTab)) {
+            showChatAuth = false;
+            selectedChatCategory = "";
+            renderPage();
         } else if (!selectedChatCategory.isEmpty()) {
             selectedChatCategory = "";
             renderPage();
@@ -3495,6 +3809,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         }
         if (!inPictureInPicture && !enteringPictureInPicture && microphoneEnabled) {
             microphoneEnabled = false;
+            emitVoiceMic(false);
             stopMicrophoneCapture();
             microphoneWasStoppedForPause = true;
             if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
@@ -3503,6 +3818,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     @Override protected void onDestroy() {
+        if (chatSocket != null) { chatSocket.disconnect(); chatSocket.close(); chatSocket = null; }
         microphoneEnabled = false;
         stopMicrophoneCapture();
         if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
