@@ -2373,7 +2373,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         outgoing.setImageBitmap(pendingVideoTransitionBitmap);
         outgoing.setScaleType(ImageView.ScaleType.FIT_XY);
         outgoing.setContentDescription("Переход к следующему видео");
-        feed.addView(outgoing, new FrameLayout.LayoutParams(-1, -1));
+        int viewportWidth = Math.max(1, contentFrame == null ? feed.getWidth() : contentFrame.getWidth());
+        int viewportHeight = Math.max(1, contentFrame == null ? feed.getHeight() : contentFrame.getHeight());
+        float scale = Math.min(viewportWidth / (float) pendingVideoTransitionBitmap.getWidth(),
+                viewportHeight / (float) pendingVideoTransitionBitmap.getHeight());
+        int width = Math.max(1, Math.round(pendingVideoTransitionBitmap.getWidth() * scale));
+        int height = Math.max(1, Math.round(pendingVideoTransitionBitmap.getHeight() * scale));
+        feed.addView(outgoing, new FrameLayout.LayoutParams(width, height, Gravity.CENTER));
         outgoing.bringToFront();
         pendingVideoTransitionView = outgoing;
     }
@@ -2477,23 +2483,26 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void applyVideoTransform() {
         if (textureView == null || videoWidth <= 0 || videoHeight <= 0) return;
-        if (isInPictureInPicture()) {
-            textureView.setTransform(new Matrix());
-            textureView.invalidate();
-            return;
+        if (!(textureView.getParent() instanceof FrameLayout)) return;
+        FrameLayout viewport = (FrameLayout) textureView.getParent();
+        int viewportWidth = viewport.getWidth();
+        int viewportHeight = viewport.getHeight();
+        if (viewportWidth <= 0 || viewportHeight <= 0) return;
+
+        int targetWidth = viewportWidth;
+        int targetHeight = viewportHeight;
+        if (!isInPictureInPicture()) {
+            float scale = Math.min(viewportWidth / (float) videoWidth, viewportHeight / (float) videoHeight);
+            targetWidth = Math.max(1, Math.round(videoWidth * scale));
+            targetHeight = Math.max(1, Math.round(videoHeight * scale));
         }
-        int viewWidth = textureView.getWidth();
-        int viewHeight = textureView.getHeight();
-        if (viewWidth <= 0 || viewHeight <= 0) return;
-        float scale = Math.min(viewWidth / (float) videoWidth, viewHeight / (float) videoHeight);
-        float scaledWidth = videoWidth * scale;
-        float scaledHeight = videoHeight * scale;
-        float dx = (viewWidth - scaledWidth) / 2f;
-        float dy = (viewHeight - scaledHeight) / 2f;
-        Matrix matrix = new Matrix();
-        matrix.setScale(scale, scale);
-        matrix.postTranslate(dx, dy);
-        textureView.setTransform(matrix);
+        ViewGroup.LayoutParams current = textureView.getLayoutParams();
+        FrameLayout.LayoutParams fitted = new FrameLayout.LayoutParams(targetWidth, targetHeight, Gravity.CENTER);
+        if (current == null || current.width != targetWidth || current.height != targetHeight
+                || !(current instanceof FrameLayout.LayoutParams) || ((FrameLayout.LayoutParams) current).gravity != Gravity.CENTER) {
+            textureView.setLayoutParams(fitted);
+        }
+        textureView.setTransform(new Matrix());
         textureView.invalidate();
     }
 
