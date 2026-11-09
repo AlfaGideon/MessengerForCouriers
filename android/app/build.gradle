@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'ru.ekip.couriers'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'ru.ekip.couriers'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '2.0.0'
+        def backendUrl = project.findProperty('backendUrl') ?: 'https://3000-idvhlbeucflilvmvwl669.e2b.app'
+        buildConfigField 'String', 'BACKEND_URL', "\"${backendUrl}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    implementation('io.socket:socket.io-client:2.1.0') {
+        exclude group: 'org.json', module: 'json'
+    }
+}

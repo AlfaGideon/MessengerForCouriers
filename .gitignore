@@ -1,0 +1,20 @@
+# Android builds and local SDK configuration
+android/.gradle/
+android/local.properties
+android/**/build/
+*.apk
+*.aab
+*.jks
+*.keystore
+*.p12
+*.ap_
+*.dex
+*.class
+release/ekip-debug.apk.sha256
+release/update.json
+# Backend runtime files; never commit credentials or user data
+backend/.env
+backend/data/
+backend/node_modules/
+
+.DS_Store
