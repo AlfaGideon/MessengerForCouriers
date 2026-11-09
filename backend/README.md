@@ -6,7 +6,7 @@ This service is a first network backend for the app: account registration/login,
 
 ## One-click Windows launcher
 
-Install Docker Desktop and run the repository-root `StartCourierka.bat`. It downloads this backend and `cloudflared`, creates a random JWT secret, starts the Docker service, opens a temporary public Quick Tunnel and copies its URL. Set that URL in **Ещё → Сервер сообщества** on every phone. The tunnel address changes on restart and is only suitable for testing.
+Install Docker Desktop and run the repository-root `StartCourierka.bat`. It uses the backend files already in this repository (fetching the required files only if the adjacent `backend` folder is missing), downloads `cloudflared` when needed, creates a random JWT secret, starts the Docker service, opens a temporary public Quick Tunnel and copies its URL. Set that URL in **Ещё → Сервер сообщества** on every phone. The tunnel address changes on restart and is only suitable for testing.
 
 ## Run locally
 

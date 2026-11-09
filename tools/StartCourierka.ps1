@@ -31,17 +31,37 @@ if (-not $dockerReady) { throw 'Docker Desktop не запустился. Отк
 $installDir = Join-Path $env:LOCALAPPDATA 'CourierkaServer'
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 
-Write-Step 'Скачиваю backend из репозитория'
-$tempDir = Join-Path $env:TEMP ('CourierkaSetup-' + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-$zipFile = Join-Path $tempDir 'project.zip'
-$zipUrl = 'https://github.com/AlfaGideon/MessengerForCouriers/archive/refs/heads/main.zip'
-Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -OutFile $zipFile
-Expand-Archive -Path $zipFile -DestinationPath $tempDir -Force
-$backendSource = Get-ChildItem -Path $tempDir -Directory | ForEach-Object { Join-Path $_.FullName 'backend' } | Where-Object { Test-Path (Join-Path $_ 'compose.yaml') } | Select-Object -First 1
-if (-not $backendSource) { throw 'В архиве не найдена папка backend.' }
-Copy-Item -Path (Join-Path $backendSource '*') -Destination $installDir -Recurse -Force
-Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+$requiredBackendFiles = @('Dockerfile', 'compose.yaml', 'package.json', 'package-lock.json', 'server.js')
+$projectRoot = $env:COURIERKA_PROJECT_ROOT
+if ([string]::IsNullOrWhiteSpace($projectRoot)) { $projectRoot = Split-Path -Parent $PSScriptRoot }
+$localBackend = Join-Path $projectRoot 'backend'
+$localBackendReady = Test-Path (Join-Path $localBackend 'compose.yaml')
+foreach ($file in $requiredBackendFiles) {
+    if (-not (Test-Path (Join-Path $localBackend $file))) { $localBackendReady = $false; break }
+}
+
+if ($localBackendReady) {
+    Write-Step 'Использую backend из папки рядом с BAT-файлом'
+    $backendSource = $localBackend
+} else {
+    Write-Step 'Локальная папка backend не найдена; скачиваю нужные файлы'
+    $backendSource = Join-Path $env:TEMP ('CourierkaBackend-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $backendSource -Force | Out-Null
+    $rawBase = 'https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/main/backend'
+    foreach ($file in $requiredBackendFiles) {
+        $fileUrl = "$rawBase/$file"
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $fileUrl -OutFile (Join-Path $backendSource $file) -TimeoutSec 90
+        } catch {
+            throw "Не удалось скачать backend-файл $fileUrl. Проверьте доступ к GitHub и повторите запуск. Подробности: $($_.Exception.Message)"
+        }
+    }
+}
+
+foreach ($file in $requiredBackendFiles) {
+    Copy-Item -Path (Join-Path $backendSource $file) -Destination $installDir -Force
+}
+if (-not $localBackendReady) { Remove-Item $backendSource -Recurse -Force -ErrorAction SilentlyContinue }
 
 $envFile = Join-Path $installDir '.env'
 if (-not (Test-Path $envFile)) {
