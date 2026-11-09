@@ -7,26 +7,48 @@ function Write-Step([string]$Message) {
 
 Write-Host 'Курьерка — запуск backend и временного глобального адреса' -ForegroundColor Yellow
 
-$docker = Get-Command docker.exe -ErrorAction SilentlyContinue
-if (-not $docker) {
+$dockerDesktopCli = Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe'
+$dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
+if (Test-Path $dockerDesktopCli) {
+    $dockerExe = $dockerDesktopCli
+} elseif ($dockerCommand) {
+    $dockerExe = $dockerCommand.Source
+} else {
     Write-Host 'Сначала установите Docker Desktop: https://www.docker.com/products/docker-desktop/' -ForegroundColor Red
     Start-Process 'https://www.docker.com/products/docker-desktop/'
     throw 'Установите Docker Desktop, перезагрузите компьютер при запросе и запустите этот BAT-файл снова.'
 }
 
 Write-Step 'Проверяю Docker'
+Write-Host "Использую Docker CLI: $dockerExe"
 $dockerReady = $false
-try { & docker.exe info *> $null; $dockerReady = ($LASTEXITCODE -eq 0) } catch { $dockerReady = $false }
+try { & $dockerExe info *> $null; $dockerReady = ($LASTEXITCODE -eq 0) } catch { $dockerReady = $false }
 if (-not $dockerReady) {
     $desktop = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
     if (Test-Path $desktop) { Start-Process $desktop }
     Write-Host 'Жду запуска Docker Desktop (до 3 минут)...'
     for ($i = 0; $i -lt 60; $i++) {
         Start-Sleep -Seconds 3
-        try { & docker.exe info *> $null; if ($LASTEXITCODE -eq 0) { $dockerReady = $true; break } } catch { }
+        try { & $dockerExe info *> $null; if ($LASTEXITCODE -eq 0) { $dockerReady = $true; break } } catch { }
     }
 }
 if (-not $dockerReady) { throw 'Docker Desktop не запустился. Откройте Docker Desktop, дождитесь статуса Running и повторите запуск BAT.' }
+
+$composeMode = ''
+$composeExe = ''
+try { & $dockerExe compose version *> $null; if ($LASTEXITCODE -eq 0) { $composeMode = 'plugin' } } catch { }
+if (-not $composeMode) {
+    $composeCommand = Get-Command docker-compose.exe -ErrorAction SilentlyContinue
+    if (-not $composeCommand) { $composeCommand = Get-Command docker-compose -ErrorAction SilentlyContinue }
+    if ($composeCommand) {
+        $composeExe = $composeCommand.Source
+        try { & $composeExe version *> $null; if ($LASTEXITCODE -eq 0) { $composeMode = 'standalone' } } catch { }
+    }
+}
+if (-not $composeMode) {
+    throw 'Docker запущен, но Docker Compose не найден. Обновите Docker Desktop, затем закройте и снова откройте его. Нужна поддержка команды docker compose.'
+}
+Write-Host "Compose mode: $composeMode"
 
 $installDir = Join-Path $env:LOCALAPPDATA 'CourierkaServer'
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
@@ -78,7 +100,11 @@ if (-not (Test-Path $envFile)) {
 Write-Step 'Собираю и запускаю backend'
 Push-Location $installDir
 try {
-    & docker.exe compose up -d --build
+    if ($composeMode -eq 'plugin') {
+        & $dockerExe compose up -d --build
+    } else {
+        & $composeExe -f compose.yaml up -d --build
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Docker Compose не смог собрать или запустить backend.' }
 } finally { Pop-Location }
 
