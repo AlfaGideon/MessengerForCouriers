@@ -35,7 +35,7 @@ Write-Step 'Скачиваю backend из репозитория'
 $tempDir = Join-Path $env:TEMP ('CourierkaSetup-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 $zipFile = Join-Path $tempDir 'project.zip'
-$zipUrl = 'https://github.com/AlfaGideon/MessengerForCouriers/archive/refs/heads/arena/2002ef57-messengerforcouriers.zip'
+$zipUrl = 'https://github.com/AlfaGideon/MessengerForCouriers/archive/refs/heads/main.zip'
 Invoke-WebRequest -UseBasicParsing -Uri $zipUrl -OutFile $zipFile
 Expand-Archive -Path $zipFile -DestinationPath $tempDir -Force
 $backendSource = Get-ChildItem -Path $tempDir -Directory | ForEach-Object { Join-Path $_.FullName 'backend' } | Where-Object { Test-Path (Join-Path $_ 'compose.yaml') } | Select-Object -First 1
