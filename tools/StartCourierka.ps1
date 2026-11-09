@@ -140,7 +140,7 @@ if (Test-Path $pidFile) {
 $stdout = Join-Path $installDir 'cloudflared.out.log'
 $stderr = Join-Path $installDir 'cloudflared.err.log'
 Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
-$tunnel = Start-Process -FilePath $cloudflared -ArgumentList @('tunnel', '--protocol', 'http2', '--url', $backendOrigin, '--no-autoupdate') -WorkingDirectory $installDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+$tunnel = Start-Process -FilePath $cloudflared -ArgumentList @('tunnel', '--protocol', 'auto', '--url', $backendOrigin, '--no-autoupdate') -WorkingDirectory $installDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
 Set-Content -Path $pidFile -Value $tunnel.Id -Encoding Ascii
 
 $publicUrl = ''
