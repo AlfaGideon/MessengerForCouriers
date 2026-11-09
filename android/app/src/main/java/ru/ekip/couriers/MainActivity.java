@@ -180,6 +180,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private TextView videoTime;
     private SeekBar seekBar;
     private String activeTab = "feed";
+    private String settingsSubpage = "";
     private String joinedRoomId = null;
     private int currentVideoIndex = 0;
     private int videoWidth = 0;
@@ -316,6 +317,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 slot.setOnClickListener(view -> {
                     if (joinedRoomId != null) closeVoiceRoom();
                     activeTab = id;
+                    settingsSubpage = "";
                     renderPage();
                 });
                 bar.addView(slot, new LinearLayout.LayoutParams(0, -1, 1f));
@@ -337,6 +339,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             item.setOnClickListener(view -> {
                 if (joinedRoomId != null) closeVoiceRoom();
                 activeTab = id;
+                settingsSubpage = "";
                 renderPage();
             });
             item.setTag(id);
@@ -388,6 +391,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         else if ("rooms".equals(activeTab)) renderRooms();
         else if ("chats".equals(activeTab)) renderEmptyPage("Чаты", "Сообщения появятся после подключения сервера.", "chat");
         else if ("profile".equals(activeTab)) renderProfile();
+        else if ("more".equals(activeTab) && "library".equals(settingsSubpage)) renderMediaLibrary();
+        else if ("more".equals(activeTab) && "about".equals(settingsSubpage)) renderAboutPage();
         else renderSettings();
         refreshPictureInPictureEligibility();
     }
@@ -694,7 +699,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         accessParams.topMargin = dp(12);
         accessParams.bottomMargin = dp(16);
         page.addView(accessCard, accessParams);
-        ScrollView scroll = new ScrollView(this);
+        ScrollView scroll = createAppScrollView();
         scroll.setFillViewport(false);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -810,7 +815,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void renderProfile() {
-        ScrollView scroll = new ScrollView(this);
+        ScrollView scroll = createAppScrollView();
         scroll.setFillViewport(false);
         scroll.setClipToPadding(false);
         LinearLayout page = pageColumn();
@@ -1231,7 +1236,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void renderSettings() {
-        ScrollView scroll = new ScrollView(this);
+        ScrollView scroll = createAppScrollView();
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         LinearLayout page = pageColumn();
@@ -1305,9 +1310,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         addSectionLabel(page, "ПРИЛОЖЕНИЕ");
         LinearLayout appCard = settingsCard();
-        addSettingRow(appCard, "Медиатека", videos.size() == 0 ? "Видео хранятся только на телефоне" : videos.size() + " видео · только на телефоне", "▣", view -> new AlertDialog.Builder(this).setTitle("Локальная медиатека").setMessage("Выбранные видео хранятся в приватной памяти этого телефона и не публикуются на сервере.").setPositiveButton("Понятно", null).show());
+        addSettingRow(appCard, "Медиатека", videos.size() == 0 ? "Видео хранятся только на телефоне" : videos.size() + " видео · только на телефоне", "▣", view -> {
+            settingsSubpage = "library";
+            renderPage();
+        });
         addSettingRow(appCard, "Обновить приложение", "Проверить новую версию", "↻", view -> checkForUpdates());
-        addSettingRow(appCard, "О приложении", "Курьерка · Android", "ⓘ", view -> new AlertDialog.Builder(this).setTitle("Курьерка").setMessage("Нативное Android-приложение. Голосовые соединения между телефонами пока требуют серверной части.").setPositiveButton("Понятно", null).show());
+        addSettingRow(appCard, "О приложении", "Курьерка · Android", "ⓘ", view -> {
+            settingsSubpage = "about";
+            renderPage();
+        });
         LinearLayout.LayoutParams appParams = new LinearLayout.LayoutParams(-1, -2);
         appParams.topMargin = dp(9);
         appParams.bottomMargin = dp(18);
@@ -1315,6 +1326,195 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         scroll.addView(page, new ScrollView.LayoutParams(-1, -2));
         contentFrame.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void addSettingsSubpageHeader(LinearLayout parent, String title, String subtitle) {
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("‹", 34, Color.WHITE, false);
+        back.setGravity(Gravity.CENTER);
+        back.setBackground(ripple(round(SURFACE, 16)));
+        back.setContentDescription("Назад к настройкам");
+        header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        back.setOnClickListener(view -> {
+            settingsSubpage = "";
+            renderPage();
+        });
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titles.setPadding(dp(13), 0, 0, 0);
+        titles.addView(text(title, 22, Color.WHITE, true));
+        TextView detail = text(subtitle, 12, MUTED, false);
+        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
+        detailParams.topMargin = dp(3);
+        titles.addView(detail, detailParams);
+        header.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(-1, -2);
+        headerParams.bottomMargin = dp(18);
+        parent.addView(header, headerParams);
+    }
+
+    private void renderMediaLibrary() {
+        LinearLayout page = pageColumn();
+        addSettingsSubpageHeader(page, "Медиатека", videos.size() + " видео · только на этом телефоне");
+        TextView addVideo = pillButton("＋   Добавить видео", ACCENT, INK, 15);
+        addVideo.setOnClickListener(view -> openVideoPicker());
+        LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(-1, dp(52));
+        addParams.bottomMargin = dp(14);
+        page.addView(addVideo, addParams);
+
+        ScrollView scroll = createAppScrollView();
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        if (videos.isEmpty()) {
+            LinearLayout empty = settingsCard();
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(dp(20), dp(28), dp(20), dp(28));
+            TextView icon = text("▣", 34, ACCENT, true);
+            icon.setGravity(Gravity.CENTER);
+            empty.addView(icon, new LinearLayout.LayoutParams(-1, dp(48)));
+            TextView title = text("Пока нет видео", 17, Color.WHITE, true);
+            title.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
+            titleParams.topMargin = dp(10);
+            empty.addView(title, titleParams);
+            TextView note = text("Добавленные ролики останутся в приватной памяти этого телефона.", 13, MUTED, false);
+            note.setGravity(Gravity.CENTER);
+            note.setLineSpacing(dp(3), 1f);
+            LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(-1, -2);
+            noteParams.topMargin = dp(7);
+            empty.addView(note, noteParams);
+            list.addView(empty);
+        } else {
+            for (int i = 0; i < videos.size(); i++) {
+                final int index = i;
+                VideoItem item = videos.get(i);
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(14), dp(12), dp(10), dp(12));
+                row.setBackground(ripple(round(SURFACE, 18)));
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+                rowParams.bottomMargin = dp(9);
+                list.addView(row, rowParams);
+
+                TextView icon = text("▶", 15, ACCENT, true);
+                icon.setGravity(Gravity.CENTER);
+                icon.setBackground(round(SURFACE_2, 13));
+                row.addView(icon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+                LinearLayout details = new LinearLayout(this);
+                details.setOrientation(LinearLayout.VERTICAL);
+                details.setPadding(dp(12), 0, dp(6), 0);
+                details.addView(text(item.title, 14, Color.WHITE, true));
+                String date = new SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(new Date(item.date));
+                TextView local = text(date + " · хранится на устройстве", 11, MUTED, false);
+                LinearLayout.LayoutParams localParams = new LinearLayout.LayoutParams(-1, -2);
+                localParams.topMargin = dp(4);
+                details.addView(local, localParams);
+                row.addView(details, new LinearLayout.LayoutParams(0, -2, 1f));
+                TextView remove = text("×", 25, MUTED, false);
+                remove.setGravity(Gravity.CENTER);
+                remove.setBackground(ripple(round(SURFACE_2, 14)));
+                remove.setContentDescription("Удалить видео");
+                row.addView(remove, new LinearLayout.LayoutParams(dp(42), dp(42)));
+                remove.setOnClickListener(view -> showDeleteVideoAt(index));
+                row.setOnClickListener(view -> {
+                    currentVideoIndex = index;
+                    activeTab = "feed";
+                    settingsSubpage = "";
+                    userWantsPlayback = true;
+                    renderPage();
+                });
+            }
+        }
+        scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        LinearLayout privacy = settingsCard();
+        TextView note = text("Только на этом телефоне · видео не загружаются на сервер", 11, MUTED, false);
+        note.setGravity(Gravity.CENTER);
+        privacy.addView(note);
+        LinearLayout.LayoutParams privacyParams = new LinearLayout.LayoutParams(-1, -2);
+        privacyParams.topMargin = dp(12);
+        page.addView(privacy, privacyParams);
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void renderAboutPage() {
+        LinearLayout page = pageColumn();
+        addSettingsSubpageHeader(page, "О приложении", "Информация о Курьерке");
+        ScrollView scroll = createAppScrollView();
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout brand = settingsCard();
+        brand.setGravity(Gravity.CENTER);
+        brand.setPadding(dp(20), dp(24), dp(20), dp(24));
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(ru.ekip.couriers.R.mipmap.ic_launcher);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        brand.addView(logo, new LinearLayout.LayoutParams(dp(76), dp(76)));
+        TextView appName = text("Курьерка", 21, Color.WHITE, true);
+        appName.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-1, -2);
+        nameParams.topMargin = dp(12);
+        brand.addView(appName, nameParams);
+        TextView platform = text("Нативное приложение для Android", 13, MUTED, false);
+        platform.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams platformParams = new LinearLayout.LayoutParams(-1, -2);
+        platformParams.topMargin = dp(5);
+        brand.addView(platform, platformParams);
+        body.addView(brand);
+
+        String version = "—";
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            if (info.versionName != null) version = info.versionName;
+        } catch (Exception ignored) { }
+        LinearLayout versionCard = settingsCard();
+        addAboutInfoRow(versionCard, "Версия", version);
+        addAboutInfoRow(versionCard, "Платформа", "Android");
+        LinearLayout.LayoutParams versionParams = new LinearLayout.LayoutParams(-1, -2);
+        versionParams.topMargin = dp(12);
+        body.addView(versionCard, versionParams);
+
+        LinearLayout features = settingsCard();
+        TextView featuresTitle = text("Что доступно", 15, Color.WHITE, true);
+        features.addView(featuresTitle);
+        addAboutBullet(features, "Локальная видеолента и медиатека");
+        addAboutBullet(features, "Профиль курьера и настройки города");
+        addAboutBullet(features, "Голосовая комната работает локально на этом устройстве");
+        TextView serverNote = text("Обмен голосом между телефонами пока не подключён: для этого нужна серверная часть.", 12, MUTED, false);
+        serverNote.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams serverParams = new LinearLayout.LayoutParams(-1, -2);
+        serverParams.topMargin = dp(12);
+        features.addView(serverNote, serverParams);
+        LinearLayout.LayoutParams featuresParams = new LinearLayout.LayoutParams(-1, -2);
+        featuresParams.topMargin = dp(12);
+        body.addView(features, featuresParams);
+
+        scroll.addView(body, new ScrollView.LayoutParams(-1, -2));
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void addAboutInfoRow(LinearLayout parent, String title, String value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(10), 0, dp(10));
+        TextView left = text(title, 13, MUTED, false);
+        row.addView(left, new LinearLayout.LayoutParams(0, -2, 1f));
+        row.addView(text(value, 13, Color.WHITE, true));
+        parent.addView(row);
+    }
+
+    private void addAboutBullet(LinearLayout parent, String message) {
+        TextView bullet = text("•  " + message, 13, MUTED, false);
+        bullet.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(10);
+        parent.addView(bullet, params);
     }
 
     private LinearLayout settingsCard() {
@@ -1364,7 +1564,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         search.setBackground(round(SURFACE_2, 15));
         card.addView(search, new LinearLayout.LayoutParams(-1, dp(50)));
 
-        ScrollView scroll = new ScrollView(this);
+        ScrollView scroll = createAppScrollView();
         scroll.setFillViewport(false);
         scroll.setVerticalScrollBarEnabled(false);
         LinearLayout list = new LinearLayout(this);
@@ -2107,6 +2307,14 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         return apk;
     }
 
+    private ScrollView createAppScrollView() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setScrollBarFadeDuration(0);
+        return scroll;
+    }
+
     private LinearLayout pageColumn() {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
@@ -2327,16 +2535,21 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private void showDeleteCurrentVideo() {
-        if (videos.isEmpty()) return;
-        VideoItem item = videos.get(currentVideoIndex);
+        showDeleteVideoAt(currentVideoIndex);
+    }
+
+    private void showDeleteVideoAt(int index) {
+        if (index < 0 || index >= videos.size()) return;
+        VideoItem item = videos.get(index);
         new AlertDialog.Builder(this)
                 .setTitle("Удалить видео?")
                 .setMessage("«" + item.title + "» будет удалено с этого устройства.")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Удалить", (dialog, which) -> {
                     new File(item.path).delete();
-                    videos.remove(currentVideoIndex);
+                    videos.remove(index);
                     if (currentVideoIndex >= videos.size()) currentVideoIndex = Math.max(0, videos.size() - 1);
+                    else if (index < currentVideoIndex) currentVideoIndex--;
                     persistVideos();
                     renderPage();
                 }).show();
@@ -2989,6 +3202,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     @Override public void onBackPressed() {
         if (joinedRoomId != null) {
             leaveVoiceRoom();
+        } else if (!settingsSubpage.isEmpty()) {
+            settingsSubpage = "";
+            renderPage();
         } else if (!"feed".equals(activeTab)) {
             activeTab = "feed";
             renderPage();
