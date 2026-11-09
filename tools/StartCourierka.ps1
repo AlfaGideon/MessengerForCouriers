@@ -108,16 +108,18 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Docker Compose не смог собрать или запустить backend.' }
 } finally { Pop-Location }
 
+$backendOrigin = 'http://127.0.0.1:3000'
+$healthUrl = "$backendOrigin/api/health"
 $healthy = $false
 for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 2
     try {
-        $health = Invoke-RestMethod -Uri 'http://localhost:3000/api/health' -TimeoutSec 4
+        $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 4
         if ($health.ok) { $healthy = $true; break }
     } catch { }
 }
-if (-not $healthy) { throw 'Backend не ответил на http://localhost:3000/api/health. Проверьте Docker Desktop.' }
-Write-Host 'Backend отвечает: http://localhost:3000/api/health' -ForegroundColor Green
+if (-not $healthy) { throw "Backend не ответил на $healthUrl. Проверьте статус контейнера в Docker Desktop." }
+Write-Host "Backend отвечает: $healthUrl" -ForegroundColor Green
 
 Write-Step 'Готовлю Cloudflare Tunnel'
 $cloudflared = Join-Path $installDir 'cloudflared.exe'
@@ -136,7 +138,7 @@ if (Test-Path $pidFile) {
 $stdout = Join-Path $installDir 'cloudflared.out.log'
 $stderr = Join-Path $installDir 'cloudflared.err.log'
 Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
-$tunnel = Start-Process -FilePath $cloudflared -ArgumentList @('tunnel', '--url', 'http://localhost:3000', '--no-autoupdate') -WorkingDirectory $installDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+$tunnel = Start-Process -FilePath $cloudflared -ArgumentList @('tunnel', '--url', $backendOrigin, '--no-autoupdate') -WorkingDirectory $installDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
 Set-Content -Path $pidFile -Value $tunnel.Id -Encoding Ascii
 
 $publicUrl = ''
