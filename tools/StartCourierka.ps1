@@ -108,7 +108,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Docker Compose не смог собрать или запустить backend.' }
 } finally { Pop-Location }
 
-$backendOrigin = 'http://127.0.0.1:3000'
+$backendOrigin = $env:COURIERKA_BACKEND_ORIGIN
+if ([string]::IsNullOrWhiteSpace($backendOrigin)) { $backendOrigin = 'http://127.0.0.1:3000' }
+$backendOrigin = $backendOrigin.TrimEnd('/')
 $healthUrl = "$backendOrigin/api/health"
 $healthy = $false
 for ($i = 0; $i -lt 30; $i++) {
