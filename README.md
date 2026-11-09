@@ -10,6 +10,12 @@ Use the single plus/empty-state action to open Android's system video picker. Th
 
 The bottom navigation has a prominent round microphone action. The room list is filtered to exactly two entries: the common room and the locally selected city. Choose a city in **Settings → Your city**; the current UI does not list other cities. This is client-side filtering only—real access control, remote participants, and microphone transport require authenticated backend/signaling enforcement, which is not yet deployed.
 
+## Backend prototype (not yet connected to the APK)
+
+A first Node.js service lives in `backend/`. It provides account endpoints, persistent text-chat messages for the seven displayed categories, Socket.IO chat/presence events, and voice-room mute/signaling events. Start it with the instructions in `backend/README.md`.
+
+Important: the APK has not yet been wired to this service, and the server only relays WebRTC signaling—it does not transmit voice audio. The current backend uses a single-process JSON store and is a test prototype, not ready for public recommendation or production data. A stable public deployment, Android client integration, real WebRTC audio/TURN, moderation, backups, and privacy workflows are still required.
+
 ## Brand and visual system
 
 The launcher, splash screen, and empty-feed hero use the square raccoon courier logo based on the supplied “Курьерка · Санкт-Петербург” reference. The “ЧАТ” word was removed; Android launchers may still apply their own icon mask to the square artwork.

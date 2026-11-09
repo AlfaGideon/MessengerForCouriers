@@ -1,0 +1,20 @@
+{
+  "name": "courierka-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prototype API and realtime signaling server for the Courierka Android app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test:smoke": "node test/smoke.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}

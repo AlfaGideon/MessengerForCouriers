@@ -12,4 +12,9 @@ android/**/build/
 *.class
 release/ekip-debug.apk.sha256
 release/update.json
+# Backend runtime files; never commit credentials or user data
+backend/.env
+backend/data/
+backend/node_modules/
+
 .DS_Store
