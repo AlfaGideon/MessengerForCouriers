@@ -12,7 +12,7 @@ The bottom navigation has a prominent round microphone action. The room list is 
 
 ## Start a temporary worldwide test server (Windows)
 
-Install and start Docker Desktop, then download and run [`StartCourierka.bat`](StartCourierka.bat). The launcher downloads the backend and Cloudflare Tunnel, generates the server secret, starts Docker Compose, and copies its temporary public URL. Paste that base URL in the APK under **Ещё → Сервер сообщества** on every phone. Keep the computer and tunnel running. The URL changes on each restart; this is for testing, not a permanent public deployment.
+Install and start Docker Desktop, then run [`StartCourierka.bat`](StartCourierka.bat) from the cloned repository folder. The launcher reuses the adjacent `backend` folder (and only fetches the required backend files if that folder is absent), downloads Cloudflare Tunnel when needed, generates the server secret, starts Docker Compose, and copies its temporary public URL. Paste that base URL in the APK under **Ещё → Сервер сообщества** on every phone. Keep the computer and tunnel running. The URL changes on each restart; this is for testing, not a permanent public deployment.
 
 ## Backend prototype
 
