@@ -106,6 +106,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private static final int ACCENT = Color.rgb(255, 207, 34);
     private static final int ACCENT_2 = Color.rgb(255, 158, 20);
     private static final int RED = Color.rgb(235, 89, 68);
+    private static final String[][] CHAT_CATEGORIES = {
+            {"💸", "Заработок, бонусы и выплаты", "Вопросы о выплатах и бонусах"},
+            {"🚨", "ДТП, угоны и помощь на смене", "Ситуации на маршруте и взаимопомощь"},
+            {"📰", "Новости и слухи", "Новости курьерской работы"},
+            {"🛠️", "Байки, аренда и ремонт", "Транспорт, аренда и ремонт"},
+            {"💡", "Лайфхаки и полезные советы", "Полезный опыт на каждый день"},
+            {"🛒", "Купить, продать, обменять", "Объявления курьеров"},
+            {"🦺", "Экипировка и аксессуары", "Снаряжение для работы"}
+    };
     private static final String[] CITY_NAMES = {
             "Абакан", "Архангельск", "Астрахань", "Балаково", "Балашиха", "Барнаул", "Белгород", "Бийск", "Благовещенск", "Братск", "Брянск",
             "Великий Новгород", "Владивосток", "Владикавказ", "Владимир", "Волгоград", "Вологда", "Воронеж", "Грозный", "Дзержинск", "Домодедово",
@@ -180,6 +189,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private TextView videoTime;
     private SeekBar seekBar;
     private String activeTab = "feed";
+    private String selectedChatCategory = "";
     private String settingsSubpage = "";
     private String joinedRoomId = null;
     private int currentVideoIndex = 0;
@@ -318,6 +328,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                     if (joinedRoomId != null) closeVoiceRoom();
                     activeTab = id;
                     settingsSubpage = "";
+                    selectedChatCategory = "";
                     renderPage();
                 });
                 bar.addView(slot, new LinearLayout.LayoutParams(0, -1, 1f));
@@ -340,6 +351,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 if (joinedRoomId != null) closeVoiceRoom();
                 activeTab = id;
                 settingsSubpage = "";
+                selectedChatCategory = "";
                 renderPage();
             });
             item.setTag(id);
@@ -389,7 +401,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         if ("feed".equals(activeTab)) renderFeed();
         else if ("rooms".equals(activeTab) && joinedRoomId != null) renderCallRoom();
         else if ("rooms".equals(activeTab)) renderRooms();
-        else if ("chats".equals(activeTab)) renderEmptyPage("Чаты", "Сообщения появятся после подключения сервера.", "chat");
+        else if ("chats".equals(activeTab) && selectedChatCategory.isEmpty()) renderChatCategories();
+        else if ("chats".equals(activeTab)) renderChatCategory();
         else if ("profile".equals(activeTab)) renderProfile();
         else if ("more".equals(activeTab) && "library".equals(settingsSubpage)) renderMediaLibrary();
         else if ("more".equals(activeTab) && "about".equals(settingsSubpage)) renderAboutPage();
@@ -650,6 +663,130 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         playbackParams.rightMargin = dp(14);
         playbackParams.bottomMargin = dp(18);
         feed.addView(playback, playbackParams);
+    }
+
+    private void renderChatCategories() {
+        LinearLayout page = pageColumn();
+        addPageHeader(page, "Чаты", "Разделы сообщества курьеров");
+
+        LinearLayout availability = new LinearLayout(this);
+        availability.setOrientation(LinearLayout.VERTICAL);
+        availability.setPadding(dp(16), dp(14), dp(16), dp(14));
+        availability.setBackground(round(SURFACE, 18));
+        availability.addView(text("Разделы чатов", 14, Color.WHITE, true));
+        TextView status = text("Список категорий готов. Для реальной переписки нужно подключить сервер чатов.", 12, MUTED, false);
+        status.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
+        statusParams.topMargin = dp(5);
+        availability.addView(status, statusParams);
+        LinearLayout.LayoutParams availabilityParams = new LinearLayout.LayoutParams(-1, -2);
+        availabilityParams.topMargin = dp(10);
+        availabilityParams.bottomMargin = dp(16);
+        page.addView(availability, availabilityParams);
+
+        addSectionLabel(page, "ТЕМЫ");
+        ScrollView scroll = createAppScrollView();
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (String[] category : CHAT_CATEGORIES) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(14), dp(13), dp(12), dp(13));
+            row.setBackground(ripple(round(SURFACE, 18)));
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = dp(9);
+            list.addView(row, rowParams);
+
+            TextView icon = text(category[0], 24, Color.WHITE, false);
+            icon.setGravity(Gravity.CENTER);
+            icon.setBackground(round(SURFACE_2, 14));
+            row.addView(icon, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+            LinearLayout copy = new LinearLayout(this);
+            copy.setOrientation(LinearLayout.VERTICAL);
+            copy.setPadding(dp(12), 0, dp(8), 0);
+            TextView title = text(category[1], 14, Color.WHITE, true);
+            title.setMaxLines(2);
+            copy.addView(title);
+            TextView detail = text(category[2], 11, MUTED, false);
+            LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
+            detailParams.topMargin = dp(4);
+            copy.addView(detail, detailParams);
+            row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1f));
+            row.addView(new IconView(this, "next", MUTED, dp(18)), new LinearLayout.LayoutParams(dp(22), dp(22)));
+            row.setContentDescription(category[1] + ". Открыть раздел");
+            row.setOnClickListener(view -> {
+                selectedChatCategory = category[1];
+                renderPage();
+            });
+        }
+        scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void renderChatCategory() {
+        String[] category = null;
+        for (String[] item : CHAT_CATEGORIES) {
+            if (item[1].equals(selectedChatCategory)) { category = item; break; }
+        }
+        if (category == null) {
+            selectedChatCategory = "";
+            renderChatCategories();
+            return;
+        }
+        LinearLayout page = pageColumn();
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("‹", 34, Color.WHITE, false);
+        back.setGravity(Gravity.CENTER);
+        back.setBackground(ripple(round(SURFACE, 16)));
+        back.setContentDescription("Назад к разделам чатов");
+        header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        back.setOnClickListener(view -> {
+            selectedChatCategory = "";
+            renderPage();
+        });
+        TextView title = text(category[1], 18, Color.WHITE, true);
+        title.setMaxLines(2);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        titleParams.leftMargin = dp(12);
+        header.addView(title, titleParams);
+        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(-1, -2);
+        headerParams.bottomMargin = dp(18);
+        page.addView(header, headerParams);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(22), dp(28), dp(22), dp(28));
+        card.setBackground(round(SURFACE, 22));
+        TextView icon = text(category[0], 34, Color.WHITE, false);
+        icon.setGravity(Gravity.CENTER);
+        card.addView(icon, new LinearLayout.LayoutParams(-1, dp(48)));
+        TextView emptyTitle = text("Сообщений пока нет", 18, Color.WHITE, true);
+        emptyTitle.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams emptyTitleParams = new LinearLayout.LayoutParams(-1, -2);
+        emptyTitleParams.topMargin = dp(12);
+        card.addView(emptyTitle, emptyTitleParams);
+        TextView description = text(category[2], 13, MUTED, false);
+        description.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams descriptionParams = new LinearLayout.LayoutParams(-1, -2);
+        descriptionParams.topMargin = dp(7);
+        card.addView(description, descriptionParams);
+        TextView serverInfo = text("Чат пока не подключён к серверу. Здесь нет реальных сообщений или участников.", 12, MUTED, false);
+        serverInfo.setGravity(Gravity.CENTER);
+        serverInfo.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams serverInfoParams = new LinearLayout.LayoutParams(-1, -2);
+        serverInfoParams.topMargin = dp(16);
+        card.addView(serverInfo, serverInfoParams);
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        cardParams.topMargin = dp(8);
+        cardParams.bottomMargin = dp(12);
+        page.addView(card, cardParams);
+        contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
     }
 
     private void renderEmptyPage(String title, String message, String icon) {
@@ -1754,7 +1891,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             microphoneEnabled = false;
             stopMicrophoneCapture();
             playMicCue(false);
-            if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
+            if (voiceArenaView != null) {
+                voiceArenaView.updateMicrophoneStatus();
+                voiceArenaView.setSpeechLevel(false, 0f);
+            }
             if (isInPictureInPicture()) {
                 updatePictureInPictureMicButton();
                 refreshPictureInPictureActions();
@@ -1770,6 +1910,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             return;
         }
         microphoneEnabled = true;
+        if (voiceArenaView != null) voiceArenaView.updateMicrophoneStatus();
         playMicCue(true);
         if (isInPictureInPicture()) {
             updatePictureInPictureMicButton();
@@ -1870,7 +2011,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                         handler.post(() -> {
                             if (microphoneEnabled) {
                                 microphoneEnabled = false;
-                                if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
+                                if (voiceArenaView != null) {
+                                    voiceArenaView.updateMicrophoneStatus();
+                                    voiceArenaView.setSpeechLevel(false, 0f);
+                                }
                                 Toast.makeText(MainActivity.this, "Микрофон остановлен системой", Toast.LENGTH_SHORT).show();
                                 if (isInPictureInPicture()) {
                                     updatePictureInPictureMicButton();
@@ -2848,7 +2992,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             paint.setTextAlign(Paint.Align.CENTER);
             paint.setStrokeCap(Paint.Cap.ROUND);
             if (!profileAvatarPath.isEmpty()) mainAvatar = decodeAvatar(profileAvatarPath, dp(78));
-            setContentDescription("Локальная игровая арена с аватарами. Перетаскивайте маленькие кружочки.");
+            updateMicrophoneStatus();
+        }
+
+        void updateMicrophoneStatus() {
+            setContentDescription("Ваш аватар в локальной голосовой комнате. Микрофон "
+                    + (microphoneEnabled ? "включён." : "выключен; вокруг аватара красный круг."));
+            invalidate();
         }
 
         void setCompactPictureInPicture(boolean compact) {
@@ -2955,11 +3105,13 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 String initial = profileName.isEmpty() ? "К" : profileName.substring(0, 1).toUpperCase(Locale.getDefault());
                 canvas.drawText(initial, cx, cy + dp(10), paint);
             }
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setColor(ACCENT);
-            paint.setAlpha(245);
-            paint.setStrokeWidth(dp(2.5f));
-            canvas.drawCircle(cx, cy, avatarRadius, paint);
+            if (!microphoneEnabled) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setColor(RED);
+                paint.setAlpha(255);
+                paint.setStrokeWidth(dp(3.5f));
+                canvas.drawCircle(cx, cy, avatarRadius + dp(4), paint);
+            }
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(Color.WHITE);
             paint.setTextSize(compactPictureInPicture ? dp(11) : dp(15));
@@ -3202,6 +3354,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     @Override public void onBackPressed() {
         if (joinedRoomId != null) {
             leaveVoiceRoom();
+        } else if (!selectedChatCategory.isEmpty()) {
+            selectedChatCategory = "";
+            renderPage();
         } else if (!settingsSubpage.isEmpty()) {
             settingsSubpage = "";
             renderPage();
