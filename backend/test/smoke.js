@@ -20,6 +20,15 @@ async function register(n) {
   assert.equal(response.status, 201);
   return response.json();
 }
+async function api(token, route, method = 'GET', body) {
+  const response = await fetch(`${base}${route}`, {
+    method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const json = await response.json();
+  assert.equal(response.ok, true, JSON.stringify(json));
+  return json;
+}
 async function main() {
   const health = await (await fetch(`${base}/api/health`)).json();
   assert.equal(health.ok, true);
@@ -27,6 +36,15 @@ async function main() {
   assert.equal(health.features.voiceAudioRelay, false);
 
   const [a, b] = await Promise.all([register(1), register(2)]);
+  await api(a.token, '/api/voice/join', 'POST', { roomId: 'global' });
+  await api(b.token, '/api/voice/join', 'POST', { roomId: 'global' });
+  let participants = await api(a.token, '/api/voice/participants?room=global');
+  assert.equal(participants.participants.length, 1);
+  await api(b.token, '/api/voice/mic', 'POST', { enabled: true });
+  participants = await api(a.token, '/api/voice/participants?room=global');
+  assert.equal(participants.participants[0].micEnabled, true);
+  await api(b.token, '/api/voice/leave', 'POST', {});
+
   const first = io(base, { auth: { token: a.token }, reconnection: false });
   const second = io(base, { auth: { token: b.token }, reconnection: false });
   try {
@@ -59,7 +77,7 @@ async function main() {
     });
     assert.deepEqual(signalAck, { ok: true });
     assert.equal((await signal).description.type, 'offer');
-    console.log('Backend smoke test passed: auth, categories, chat persistence/realtime, voice presence/mute and signaling relay. Audio is not relayed.');
+    console.log('Backend smoke test passed: auth, categories, persistent/realtime chat, HTTP voice presence/mute, Socket.IO presence/mute and signaling relay. Audio is not relayed.');
   } finally {
     first.close();
     second.close();

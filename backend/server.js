@@ -179,7 +179,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     const user = bearerUser(req);
-    if (!user && (url.pathname === '/api/me' || url.pathname.startsWith('/api/messages') || url.pathname === '/api/reports')) {
+    if (!user && (url.pathname === '/api/me' || url.pathname.startsWith('/api/messages') || url.pathname === '/api/reports' || url.pathname.startsWith('/api/voice/'))) {
       return error(res, 401, 'unauthorized', 'Sign in to continue.');
     }
     if (req.method === 'GET' && url.pathname === '/api/me') return json(res, 200, { user: publicUser(user) });
@@ -187,14 +187,64 @@ const server = http.createServer(async (req, res) => {
       const categoryId = url.searchParams.get('category');
       if (!categoryById(categoryId)) return error(res, 400, 'unknown_category', 'Unknown chat category.');
       const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 50)));
-      const messages = store.messages.filter(item => item.categoryId === categoryId).slice(-limit).map(cleanMessage);
-      return json(res, 200, { messages });
+      const inCategory = store.messages.filter(item => item.categoryId === categoryId);
+      const after = url.searchParams.get('after');
+      let messages;
+      if (after) {
+        const index = inCategory.findIndex(item => item.id === after);
+        messages = index >= 0 ? inCategory.slice(index + 1, index + 1 + limit) : inCategory.slice(-limit);
+      } else messages = inCategory.slice(-limit);
+      return json(res, 200, { messages: messages.map(cleanMessage) });
     }
     if (req.method === 'POST' && url.pathname === '/api/messages') {
       const body = await parseBody(req);
       const message = makeMessage(user, body.categoryId, body.text);
       io.to(`chat:${message.categoryId}`).emit('chat:message', message);
       return json(res, 201, { message });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/voice/join') {
+      const body = await parseBody(req);
+      const roomId = typeof body.roomId === 'string' ? body.roomId : '';
+      if (!/^[a-z0-9:_-]{1,80}$/i.test(roomId)) return error(res, 400, 'invalid_room', 'Invalid room id.');
+      const previousRoom = httpUserVoiceRoom.get(user.id);
+      if (previousRoom && previousRoom !== roomId) {
+        const previous = httpVoiceRooms.get(previousRoom);
+        if (previous) previous.delete(user.id);
+      }
+      if (!httpVoiceRooms.has(roomId)) httpVoiceRooms.set(roomId, new Map());
+      const room = httpVoiceRooms.get(roomId);
+      const now = Date.now();
+      for (const [id, person] of room) if (now - person.lastSeen > HTTP_VOICE_TTL_MS) room.delete(id);
+      room.set(user.id, { userId: user.id, displayName: user.displayName, micEnabled: false, lastSeen: now });
+      httpUserVoiceRoom.set(user.id, roomId);
+      return json(res, 200, { roomId, participants: [...room.values()].filter(person => person.userId !== user.id).map(({ userId, displayName, micEnabled }) => ({ userId, displayName, micEnabled })) });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/voice/participants') {
+      const roomId = url.searchParams.get('room') || '';
+      const room = httpVoiceRooms.get(roomId);
+      const now = Date.now();
+      if (room) for (const [id, person] of room) if (now - person.lastSeen > HTTP_VOICE_TTL_MS) room.delete(id);
+      const current = room && room.get(user.id);
+      if (!current) return error(res, 403, 'not_in_room', 'Join this room first.');
+      current.lastSeen = now;
+      return json(res, 200, { participants: [...room.values()].filter(person => person.userId !== user.id).map(({ userId, displayName, micEnabled }) => ({ userId, displayName, micEnabled })) });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/voice/mic') {
+      const body = await parseBody(req);
+      const roomId = httpUserVoiceRoom.get(user.id);
+      const room = roomId && httpVoiceRooms.get(roomId);
+      const person = room && room.get(user.id);
+      if (!person || typeof body.enabled !== 'boolean') return error(res, 403, 'not_in_room', 'Join a room before changing microphone state.');
+      person.micEnabled = body.enabled;
+      person.lastSeen = Date.now();
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/voice/leave') {
+      const roomId = httpUserVoiceRoom.get(user.id);
+      const room = roomId && httpVoiceRooms.get(roomId);
+      if (room) room.delete(user.id);
+      httpUserVoiceRoom.delete(user.id);
+      return json(res, 200, { ok: true });
     }
     if (req.method === 'POST' && url.pathname === '/api/reports') {
       const body = await parseBody(req);
@@ -221,6 +271,9 @@ const io = new Server(server, {
 });
 const userSockets = new Map();
 const voiceRooms = new Map();
+const httpVoiceRooms = new Map();
+const httpUserVoiceRoom = new Map();
+const HTTP_VOICE_TTL_MS = 25_000;
 function addSocket(userId, socketId) {
   if (!userSockets.has(userId)) userSockets.set(userId, new Set());
   userSockets.get(userId).add(socketId);

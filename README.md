@@ -12,7 +12,7 @@ The bottom navigation has a prominent round microphone action. The room list is 
 
 ## Backend prototype (not yet connected to the APK)
 
-A Node.js service lives in `backend/`. The Android client can register/login and use persistent text chat for the seven displayed categories over Socket.IO/HTTP; it also sends voice-room membership and mute state to the backend. Configure the endpoint in **Settings → Server community** or override the build default with the Gradle property `-PbackendUrl=https://your-host.example`.
+A Node.js service lives in `backend/`. The Android client can register/login, exchange persistent text messages for all seven categories over authenticated HTTPS polling, and sync voice-room presence/mute state. Configure the endpoint in **Ещё → Сервер сообщества**; the default is the current temporary test endpoint.
 
 Important: the server only relays WebRTC signaling and mute/presence state—it does **not** transmit voice audio. The current backend uses a single-process JSON store and is a test prototype, not ready for public recommendation or production data. A stable public deployment, real WebRTC audio/TURN, moderation, backups, and privacy workflows are still required.
 

@@ -1,6 +1,6 @@
 # Курьерка backend (prototype)
 
-This service is a first network backend for the app: account registration/login, the seven chat categories shown in the Android UI, persistent plain-text chat messages, report submission, voice-room presence/mute state, and WebRTC signaling events.
+This service is a first network backend for the app: account registration/login, the seven chat categories shown in the Android UI, persistent plain-text chat messages, report submission, voice-room presence/mute state, and optional Socket.IO/WebRTC signaling events. The current Android app uses authenticated HTTP polling for chat and voice presence/mute state.
 
 **This is a prototype, not a production service.** The current Android client can register/login and exchange text messages through it; it also sends voice-room presence and mute state. The server's WebRTC signaling endpoints are only a foundation: this process does **not** transmit or relay audio, and the Android client does not yet negotiate peer audio. Do not advertise network voice as working yet.
 

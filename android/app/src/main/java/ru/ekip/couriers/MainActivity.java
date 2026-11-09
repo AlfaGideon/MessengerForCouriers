@@ -69,8 +69,6 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import io.socket.client.IO;
-import io.socket.client.Socket;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -79,13 +77,11 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
-import java.net.URI;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.Locale;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
@@ -101,6 +97,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private static final int MICROPHONE_PERMISSION_REQUEST = 4106;
     private static final String ACTION_PIP_PLAY_PAUSE = "ru.ekip.couriers.action.PIP_PLAY_PAUSE";
     private static final String ACTION_PIP_MIC_TOGGLE = "ru.ekip.couriers.action.PIP_MIC_TOGGLE";
+    private static final String BACKEND_DEFAULT_URL = "https://3000-idvhlbeucflilvmvwl669.e2b.app";
     private static final String UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/update.json";
     private static final String UPDATE_APK_PREFIX = "https://raw.githubusercontent.com/AlfaGideon/MessengerForCouriers/arena/52ee8420-messengerforcouriers/release/ekip-debug.apk";
     private static final int INK = Color.rgb(14, 13, 11);
@@ -201,7 +198,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private String backendToken = "";
     private String backendDisplayName = "";
     private String chatJoinedCategoryId = "";
-    private Socket chatSocket;
+    private Runnable chatPollingTask;
+    private Runnable voicePollingTask;
+    private TextView voicePresenceView;
+    private String voicePresenceJoinedRoomId = "";
+    private final ArrayList<VoiceParticipant> voiceParticipants = new ArrayList<>();
     private final ArrayList<JSONObject> chatMessages = new ArrayList<>();
     private LinearLayout chatMessageList;
     private ScrollView chatMessageScroll;
@@ -407,6 +408,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private void renderPage() {
         if (!preservingVideoTransitionForRender) clearPendingVideoTransition();
         pipRoomHeader = pipRoomControls = pipRoomPage = null;
+        voicePresenceView = null;
         pipRoomStageParams = null;
         pipRoomMicButton = null;
         pipRoomMicIcon = null;
@@ -749,8 +751,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private String backendBaseUrl() {
-        String value = getSharedPreferences("ekip_native", MODE_PRIVATE).getString("backend_url", BuildConfig.BACKEND_URL);
-        if (value == null || value.trim().isEmpty()) value = BuildConfig.BACKEND_URL;
+        String value = getSharedPreferences("ekip_native", MODE_PRIVATE).getString("backend_url", BACKEND_DEFAULT_URL);
+        if (value == null || value.trim().isEmpty()) value = BACKEND_DEFAULT_URL;
         value = value.trim();
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
         return value;
@@ -798,49 +800,12 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                     backendDisplayName = user.optString("displayName", username);
                     getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putString("backend_token", backendToken)
                             .putString("backend_user_id", user.optString("id", "")).putString("backend_display_name", backendDisplayName).apply();
-                    showChatAuth = false; chatAuthError = ""; ensureChatSocket(); renderPage();
+                    showChatAuth = false; chatAuthError = ""; renderPage();
                 });
             } catch (Exception failure) {
                 handler.post(() -> { chatRequestRunning = false; chatAuthError = failure.getMessage() == null ? "Нет связи с сервером" : failure.getMessage(); renderPage(); });
             }
         });
-    }
-
-    private void ensureChatSocket() {
-        if (backendToken.isEmpty()) return;
-        if (chatSocket != null) { if (!chatSocket.connected()) chatSocket.connect(); return; }
-        try {
-            IO.Options options = new IO.Options();
-            options.auth = new HashMap<>(); options.auth.put("token", backendToken);
-            options.reconnection = true; options.reconnectionAttempts = Integer.MAX_VALUE;
-            chatSocket = IO.socket(backendBaseUrl(), options);
-            chatSocket.on(Socket.EVENT_CONNECT, args -> handler.post(() -> {
-                if (chatConnectionStatus != null) chatConnectionStatus.setText("Подключено к серверу");
-                if (!selectedChatCategory.isEmpty()) joinBackendChat(selectedChatCategory);
-                if (joinedRoomId != null) emitVoiceJoin();
-            }));
-            chatSocket.on(Socket.EVENT_DISCONNECT, args -> handler.post(() -> { if (chatConnectionStatus != null) chatConnectionStatus.setText("Связь потеряна · переподключаемся…"); }));
-            chatSocket.on(Socket.EVENT_CONNECT_ERROR, args -> handler.post(() -> { if (chatConnectionStatus != null) chatConnectionStatus.setText("Нет связи с сервером"); }));
-            chatSocket.on("chat:message", args -> {
-                if (args.length > 0 && args[0] instanceof JSONObject) handler.post(() -> appendIncomingChatMessage((JSONObject) args[0]));
-            });
-            chatSocket.on("voice:mic", args -> { if (voiceArenaView != null) handler.post(voiceArenaView::invalidate); });
-            chatSocket.connect();
-        } catch (Exception failure) {
-            if (chatConnectionStatus != null) chatConnectionStatus.setText("Не удалось создать соединение с сервером");
-        }
-    }
-
-    private void emitVoiceJoin() {
-        if (chatSocket == null || !chatSocket.connected() || joinedRoomId == null) return;
-        try { chatSocket.emit("voice:join", new JSONObject().put("roomId", joinedRoomId)); }
-        catch (Exception ignored) { }
-    }
-
-    private void emitVoiceMic(boolean enabled) {
-        if (chatSocket == null || !chatSocket.connected() || joinedRoomId == null) return;
-        try { chatSocket.emit("voice:mic", new JSONObject().put("enabled", enabled)); }
-        catch (Exception ignored) { }
     }
 
     private String chatCategoryId(String title) {
@@ -850,24 +815,124 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void joinBackendChat(String title) {
         String id = chatCategoryId(title);
-        if (id.isEmpty() || chatSocket == null || !chatSocket.connected()) return;
-        if (!chatJoinedCategoryId.isEmpty() && !chatJoinedCategoryId.equals(id)) {
-            try { chatSocket.emit("chat:leave", new JSONObject().put("categoryId", chatJoinedCategoryId)); } catch (Exception ignored) { }
-        }
+        if (id.isEmpty() || backendToken.isEmpty()) return;
         chatJoinedCategoryId = id;
-        try { chatSocket.emit("chat:join", new JSONObject().put("categoryId", id)); } catch (Exception ignored) { }
+        chatMessages.clear();
+        if (chatMessageList != null) renderBackendMessages();
+        if (chatPollingTask != null) handler.removeCallbacks(chatPollingTask);
+        chatPollingTask = new Runnable() {
+            @Override public void run() {
+                if (!"chats".equals(activeTab) || !id.equals(chatCategoryId(selectedChatCategory)) || backendToken.isEmpty()) return;
+                String after = chatMessages.isEmpty() ? "" : chatMessages.get(chatMessages.size() - 1).optString("id", "");
+                String route = "/api/messages?category=" + id + "&limit=100" + (after.isEmpty() ? "" : "&after=" + after);
+                ioExecutor.execute(() -> {
+                    try {
+                        JSONObject response = backendRequest("GET", route, null);
+                        JSONArray incoming = response.optJSONArray("messages");
+                        handler.post(() -> {
+                            if (!"chats".equals(activeTab) || !id.equals(chatCategoryId(selectedChatCategory)) || chatMessageList == null) return;
+                            if (incoming != null) for (int i = 0; i < incoming.length(); i++) {
+                                JSONObject item = incoming.optJSONObject(i);
+                                if (item != null) appendIncomingChatMessage(item);
+                            }
+                            if (chatConnectionStatus != null) chatConnectionStatus.setText("Подключено · " + chatMessages.size() + " сообщений");
+                            handler.postDelayed(this, 3500);
+                        });
+                    } catch (Exception failure) {
+                        handler.post(() -> {
+                            if (chatConnectionStatus != null) chatConnectionStatus.setText("Связь потеряна · повторяем подключение");
+                            handler.postDelayed(this, 5000);
+                        });
+                    }
+                });
+            }
+        };
+        handler.post(chatPollingTask);
+    }
+
+    private void joinBackendVoiceRoom() {
+        if (backendToken.isEmpty() || joinedRoomId == null) return;
+        if (joinedRoomId.equals(voicePresenceJoinedRoomId)) {
+            if (voicePollingTask == null) pollVoicePresence();
+            return;
+        }
+        voicePresenceJoinedRoomId = joinedRoomId;
+        JSONObject body = new JSONObject();
+        try { body.put("roomId", joinedRoomId); } catch (Exception ignored) { }
         ioExecutor.execute(() -> {
             try {
-                JSONObject response = backendRequest("GET", "/api/messages?category=" + id + "&limit=100", null);
-                JSONArray list = response.optJSONArray("messages");
+                JSONObject response = backendRequest("POST", "/api/voice/join", body);
+                JSONArray participants = response.optJSONArray("participants");
                 handler.post(() -> {
-                    if (!"chats".equals(activeTab) || !id.equals(chatCategoryId(selectedChatCategory)) || chatMessageList == null) return;
-                    chatMessages.clear(); if (list != null) for (int i=0;i<list.length();i++) { JSONObject item=list.optJSONObject(i); if (item != null) chatMessages.add(item); }
-                    renderBackendMessages();
-                    if (chatConnectionStatus != null) chatConnectionStatus.setText("Подключено · " + chatMessages.size() + " сообщений");
+                    if (joinedRoomId == null) return;
+                    updateVoiceParticipants(participants);
+                    pollVoicePresence();
                 });
-            } catch (Exception failure) { handler.post(() -> { if (chatConnectionStatus != null) chatConnectionStatus.setText("Не удалось загрузить сообщения"); }); }
+            } catch (Exception failure) {
+                voicePresenceJoinedRoomId = "";
+                handler.post(() -> { if (voicePresenceView != null) voicePresenceView.setText("Нет связи с сервером участников"); });
+            }
         });
+    }
+
+    private void pollVoicePresence() {
+        if (joinedRoomId == null || backendToken.isEmpty()) return;
+        if (voicePollingTask != null) handler.removeCallbacks(voicePollingTask);
+        final String roomId = joinedRoomId;
+        voicePollingTask = new Runnable() {
+            @Override public void run() {
+                if (!roomId.equals(joinedRoomId) || backendToken.isEmpty()) return;
+                ioExecutor.execute(() -> {
+                    try {
+                        JSONObject response = backendRequest("GET", "/api/voice/participants?room=" + roomId, null);
+                        JSONArray participants = response.optJSONArray("participants");
+                        handler.post(() -> {
+                            if (!roomId.equals(joinedRoomId)) return;
+                            updateVoiceParticipants(participants);
+                            handler.postDelayed(this, 5000);
+                        });
+                    } catch (Exception failure) {
+                        handler.post(() -> { if (voicePresenceView != null) voicePresenceView.setText("Ожидаем связь с сервером…"); handler.postDelayed(this, 6000); });
+                    }
+                });
+            }
+        };
+        handler.postDelayed(voicePollingTask, 3500);
+    }
+
+    private void updateVoiceParticipants(JSONArray values) {
+        voiceParticipants.clear();
+        if (values != null) for (int i = 0; i < values.length(); i++) {
+            JSONObject item = values.optJSONObject(i);
+            if (item != null) voiceParticipants.add(new VoiceParticipant(item.optString("userId", ""), item.optString("displayName", "Курьер"), item.optBoolean("micEnabled", false)));
+        }
+        if (voiceArenaView != null) voiceArenaView.setParticipants(voiceParticipants);
+        if (voicePresenceView != null) {
+            StringBuilder text = new StringBuilder("В сети: ").append(voiceParticipants.size() + 1).append(" · сетевой звук пока не подключён");
+            for (VoiceParticipant participant : voiceParticipants) {
+                text.append("\n").append(participant.micEnabled ? "● " : "🔴 ").append(participant.displayName);
+            }
+            voicePresenceView.setText(text.toString());
+        }
+    }
+
+    private void updateBackendVoiceMic(boolean enabled) {
+        if (backendToken.isEmpty() || joinedRoomId == null) return;
+        JSONObject body = new JSONObject();
+        try { body.put("enabled", enabled); } catch (Exception ignored) { }
+        ioExecutor.execute(() -> {
+            try { backendRequest("POST", "/api/voice/mic", body); }
+            catch (Exception failure) { handler.post(() -> { if (voicePresenceView != null) voicePresenceView.setText("Не удалось обновить статус микрофона на сервере"); }); }
+        });
+    }
+
+    private void leaveBackendVoiceRoom() {
+        if (voicePollingTask != null) { handler.removeCallbacks(voicePollingTask); voicePollingTask = null; }
+        voicePresenceJoinedRoomId = "";
+        voiceParticipants.clear();
+        if (voiceArenaView != null) voiceArenaView.setParticipants(voiceParticipants);
+        if (backendToken.isEmpty()) return;
+        ioExecutor.execute(() -> { try { backendRequest("POST", "/api/voice/leave", new JSONObject()); } catch (Exception ignored) { } });
     }
 
     private void appendIncomingChatMessage(JSONObject message) {
@@ -945,7 +1010,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             else {
                 backendToken = ""; backendDisplayName = ""; chatMessages.clear();
                 getSharedPreferences("ekip_native", MODE_PRIVATE).edit().remove("backend_token").remove("backend_user_id").remove("backend_display_name").apply();
-                if (chatSocket != null) { chatSocket.disconnect(); chatSocket.close(); chatSocket = null; }
+                if (chatPollingTask != null) handler.removeCallbacks(chatPollingTask);
+                chatJoinedCategoryId = "";
                 showChatAuth = false; selectedChatCategory = "";
             }
             renderPage();
@@ -990,7 +1056,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             row.setOnClickListener(view -> {
                 selectedChatCategory = category[1];
                 if (backendToken.isEmpty()) { showChatAuth = true; chatRegisterMode = true; }
-                else { showChatAuth = false; ensureChatSocket(); }
+                else { showChatAuth = false; }
                 renderPage();
             });
         }
@@ -1014,9 +1080,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         back.setBackground(ripple(round(SURFACE, 16))); back.setContentDescription("Назад к разделам чатов");
         header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
         back.setOnClickListener(view -> {
-            if (chatSocket != null && chatSocket.connected() && !chatJoinedCategoryId.isEmpty()) {
-                try { chatSocket.emit("chat:leave", new JSONObject().put("categoryId", chatJoinedCategoryId)); } catch (Exception ignored) { }
-            }
+            if (chatPollingTask != null) { handler.removeCallbacks(chatPollingTask); chatPollingTask = null; }
             chatJoinedCategoryId = ""; selectedChatCategory = ""; chatMessageList = null; chatMessageScroll = null; chatComposer = null; renderPage();
         });
         LinearLayout titles = new LinearLayout(this); titles.setOrientation(LinearLayout.VERTICAL); titles.setPadding(dp(12), 0, 0, 0);
@@ -1049,8 +1113,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         page.addView(composerRow, composerParams);
         contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
         renderBackendMessages();
-        ensureChatSocket();
-        if (chatSocket != null && chatSocket.connected()) joinBackendChat(selectedChatCategory);
+        joinBackendChat(selectedChatCategory);
     }
 
     private void renderEmptyPage(String title, String message, String icon) {
@@ -1178,6 +1241,11 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         TextView count = pillButton(room.global ? "ОБЩАЯ" : "ВАШ ГОРОД", SURFACE_2, ACCENT, 9);
         header.addView(count, new LinearLayout.LayoutParams(-2, dp(38)));
         page.addView(header);
+        voicePresenceView = text(backendToken.isEmpty() ? "Войдите во вкладке «Чаты», чтобы видеть участников сервера." : "Подключаемся к серверу участников…", 10, MUTED, false);
+        voicePresenceView.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams presenceParams = new LinearLayout.LayoutParams(-1, -2);
+        presenceParams.bottomMargin = dp(9);
+        page.addView(voicePresenceView, presenceParams);
 
         FrameLayout stage = new FrameLayout(this);
         stage.setBackground(round(SURFACE, 26));
@@ -1213,10 +1281,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         leave.setOnClickListener(view -> leaveVoiceRoom());
         page.addView(controls);
         contentFrame.addView(page, new FrameLayout.LayoutParams(-1, -1));
-        if (!backendToken.isEmpty()) {
-            ensureChatSocket();
-            if (chatSocket != null && chatSocket.connected()) emitVoiceJoin();
-        }
+        if (backendToken.isEmpty()) {
+            voicePresenceView.setText("Войдите во вкладке «Чаты», чтобы видеть участников сервера.");
+        } else joinBackendVoiceRoom();
     }
 
     private void renderProfile() {
@@ -1926,8 +1993,9 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 Toast.makeText(this, "Нужен публичный HTTPS-адрес сервера", Toast.LENGTH_LONG).show();
                 return;
             }
-            if (chatSocket != null) { chatSocket.disconnect(); chatSocket.close(); chatSocket = null; }
-            chatSocket = null; backendToken = ""; backendDisplayName = ""; selectedChatCategory = "";
+            if (chatPollingTask != null) handler.removeCallbacks(chatPollingTask);
+            if (voicePollingTask != null) handler.removeCallbacks(voicePollingTask);
+            backendToken = ""; backendDisplayName = ""; selectedChatCategory = "";
             getSharedPreferences("ekip_native", MODE_PRIVATE).edit().putString("backend_url", value)
                     .remove("backend_token").remove("backend_user_id").remove("backend_display_name").apply();
             settingsSubpage = "";
@@ -2196,7 +2264,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private void toggleMicrophone() {
         if (microphoneEnabled) {
             microphoneEnabled = false;
-            emitVoiceMic(false);
+            updateBackendVoiceMic(false);
             stopMicrophoneCapture();
             playMicCue(false);
             if (voiceArenaView != null) {
@@ -2218,7 +2286,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             return;
         }
         microphoneEnabled = true;
-        emitVoiceMic(true);
+        updateBackendVoiceMic(true);
         if (voiceArenaView != null) voiceArenaView.updateMicrophoneStatus();
         playMicCue(true);
         if (isInPictureInPicture()) {
@@ -2361,7 +2429,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     private void closeVoiceRoom() {
         boolean wasInRoom = joinedRoomId != null;
-        if (chatSocket != null && chatSocket.connected() && wasInRoom) chatSocket.emit("voice:leave");
+        if (wasInRoom) leaveBackendVoiceRoom();
         if (microphoneEnabled) microphoneEnabled = false;
         stopMicrophoneCapture();
         if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
@@ -3280,6 +3348,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     private class VoiceArenaView extends View {
+        private final ArrayList<VoiceParticipant> remoteParticipants = new ArrayList<>();
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint photoPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         private final ArrayList<ArenaBubble> bubbles = new ArrayList<>();
@@ -3313,6 +3382,12 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
         void setCompactPictureInPicture(boolean compact) {
             compactPictureInPicture = compact;
+            invalidate();
+        }
+
+        void setParticipants(ArrayList<VoiceParticipant> participants) {
+            remoteParticipants.clear();
+            if (participants != null) remoteParticipants.addAll(participants);
             invalidate();
         }
 
@@ -3357,7 +3432,6 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             float cx = getWidth() / 2f;
             float cy = getHeight() / 2f;
             if (bubbles.isEmpty()) initBubbles(getWidth(), getHeight());
-            updatePhysics(cx, cy);
             float boundaryRadius = Math.min(getWidth(), getHeight()) * .48f;
             if (!compactPictureInPicture) {
                 float inset = dp(8);
@@ -3376,7 +3450,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                     ? Math.min(mainRadius, Math.max(dp(8), (getWidth() - dp(14)) / 2f))
                     : mainRadius;
             if (speaking) drawSpeechWaves(canvas, cx, cy, boundaryRadius, avatarRadius);
-            if (!compactPictureInPicture) for (ArenaBubble bubble : bubbles) drawGameBubble(canvas, bubble);
+            if (!compactPictureInPicture) drawRemoteParticipants(canvas, cx, cy);
             drawMainAvatar(canvas, cx, cy, avatarRadius);
 
             if (animating) postInvalidateOnAnimation();
@@ -3394,6 +3468,38 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
                 paint.setAlpha((int) (165 * (1f - phase) * (.5f + .5f * voiceLevel)));
                 float radius = inner + phase * (maxRadius - inner) + voiceLevel * dp(5);
                 canvas.drawCircle(cx, cy, radius, paint);
+            }
+        }
+
+        private void drawRemoteParticipants(Canvas canvas, float cx, float cy) {
+            int count = Math.min(8, remoteParticipants.size());
+            if (count == 0) return;
+            float orbitX = Math.min(getWidth() * .36f, dp(138));
+            float orbitY = Math.min(getHeight() * .30f, dp(132));
+            float radius = dp(count > 5 ? 20 : 24);
+            for (int i = 0; i < count; i++) {
+                VoiceParticipant participant = remoteParticipants.get(i);
+                double angle = -Math.PI / 2 + (2 * Math.PI * i / count);
+                float x = cx + (float) Math.cos(angle) * orbitX;
+                float y = cy + (float) Math.sin(angle) * orbitY;
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(SURFACE_2);
+                canvas.drawCircle(x, y, radius, paint);
+                if (!participant.micEnabled) {
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setColor(RED);
+                    paint.setStrokeWidth(dp(3));
+                    canvas.drawCircle(x, y, radius + dp(3), paint);
+                }
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.WHITE);
+                paint.setTextSize(dp(12));
+                String initial = participant.displayName == null || participant.displayName.isEmpty() ? "К" : participant.displayName.substring(0, 1).toUpperCase(Locale.getDefault());
+                canvas.drawText(initial, x, y + dp(4), paint);
+                paint.setTextSize(dp(9));
+                String name = participant.displayName == null ? "Курьер" : participant.displayName;
+                if (name.length() > 11) name = name.substring(0, 10) + "…";
+                canvas.drawText(name, x, y + radius + dp(15), paint);
             }
         }
 
@@ -3747,6 +3853,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     private void setPictureInPictureRoomUi(boolean inPictureInPicture) {
         if (pipRoomHeader != null) pipRoomHeader.setVisibility(inPictureInPicture ? View.GONE : View.VISIBLE);
         if (pipRoomControls != null) pipRoomControls.setVisibility(inPictureInPicture ? View.GONE : View.VISIBLE);
+        if (voicePresenceView != null) voicePresenceView.setVisibility(inPictureInPicture ? View.GONE : View.VISIBLE);
         if (pipRoomPage != null) {
             int padding = inPictureInPicture ? 0 : dp(18);
             pipRoomPage.setPadding(padding, padding, padding, padding);
@@ -3809,7 +3916,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         }
         if (!inPictureInPicture && !enteringPictureInPicture && microphoneEnabled) {
             microphoneEnabled = false;
-            emitVoiceMic(false);
+            updateBackendVoiceMic(false);
             stopMicrophoneCapture();
             microphoneWasStoppedForPause = true;
             if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
@@ -3818,7 +3925,8 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
     }
 
     @Override protected void onDestroy() {
-        if (chatSocket != null) { chatSocket.disconnect(); chatSocket.close(); chatSocket = null; }
+        if (chatPollingTask != null) handler.removeCallbacks(chatPollingTask);
+        if (voicePollingTask != null) handler.removeCallbacks(voicePollingTask);
         microphoneEnabled = false;
         stopMicrophoneCapture();
         if (voiceArenaView != null) voiceArenaView.setSpeechLevel(false, 0f);
@@ -3842,6 +3950,15 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         final String title;
         final long date;
         VideoItem(String path, String title, long date) { this.path = path; this.title = title; this.date = date; }
+    }
+
+    private static class VoiceParticipant {
+        final String userId;
+        final String displayName;
+        final boolean micEnabled;
+        VoiceParticipant(String userId, String displayName, boolean micEnabled) {
+            this.userId = userId; this.displayName = displayName; this.micEnabled = micEnabled;
+        }
     }
 
     private static class RoomItem {
