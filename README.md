@@ -8,9 +8,13 @@ Use the single plus/empty-state action to open Android's system video picker. Th
 
 ## Voice rooms and city access
 
-The bottom navigation has a prominent round microphone action. The room list is filtered to exactly two entries: the common room and the locally selected city. Choose a city in **Settings → Your city**; the current UI does not list other cities. This is client-side filtering only—real access control, remote participants, and microphone transport require authenticated backend/signaling enforcement, which is not yet deployed.
+The bottom navigation has a prominent round microphone action. The room list is filtered to exactly two entries: the common room and the locally selected city. Choose a city in **Settings → Your city**; the current UI does not list other cities. The APK can sync room presence and mute state with the backend, but network audio and fully enforced room authorization are not implemented.
 
-## Backend prototype (not yet connected to the APK)
+## Start a temporary worldwide test server (Windows)
+
+Install and start Docker Desktop, then download and run [`StartCourierka.bat`](StartCourierka.bat). The launcher downloads the backend and Cloudflare Tunnel, generates the server secret, starts Docker Compose, and copies its temporary public URL. Paste that base URL in the APK under **Ещё → Сервер сообщества** on every phone. Keep the computer and tunnel running. The URL changes on each restart; this is for testing, not a permanent public deployment.
+
+## Backend prototype
 
 A Node.js service lives in `backend/`. The Android client can register/login, exchange persistent text messages for all seven categories over authenticated HTTPS polling, and sync voice-room presence/mute state. Configure the endpoint in **Ещё → Сервер сообщества**; the default is the current temporary test endpoint.
 

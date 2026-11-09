@@ -4,6 +4,10 @@ This service is a first network backend for the app: account registration/login,
 
 **This is a prototype, not a production service.** The current Android client can register/login and exchange text messages through it; it also sends voice-room presence and mute state. The server's WebRTC signaling endpoints are only a foundation: this process does **not** transmit or relay audio, and the Android client does not yet negotiate peer audio. Do not advertise network voice as working yet.
 
+## One-click Windows launcher
+
+Install Docker Desktop and run the repository-root `StartCourierka.bat`. It downloads this backend and `cloudflared`, creates a random JWT secret, starts the Docker service, opens a temporary public Quick Tunnel and copies its URL. Set that URL in **Ещё → Сервер сообщества** on every phone. The tunnel address changes on restart and is only suitable for testing.
+
 ## Run locally
 
 Requirements: Node.js 20+ and npm.
