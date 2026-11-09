@@ -140,7 +140,7 @@ if (Test-Path $pidFile) {
 $stdout = Join-Path $installDir 'cloudflared.out.log'
 $stderr = Join-Path $installDir 'cloudflared.err.log'
 Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
-$tunnel = Start-Process -FilePath $cloudflared -ArgumentList @('tunnel', '--url', $backendOrigin, '--no-autoupdate') -WorkingDirectory $installDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+$tunnel = Start-Process -FilePath $cloudflared -ArgumentList @('tunnel', '--protocol', 'http2', '--url', $backendOrigin, '--no-autoupdate') -WorkingDirectory $installDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
 Set-Content -Path $pidFile -Value $tunnel.Id -Encoding Ascii
 
 $publicUrl = ''
@@ -161,10 +161,37 @@ if (-not $publicUrl) {
     throw 'Cloudflare Tunnel не выдал адрес. Проверьте подключение к интернету и повторите запуск.'
 }
 
+$publicHealthUrl = "$publicUrl/api/health"
+$publicHealthy = $false
+$publicFailure = ''
+Write-Step 'Проверяю, что публичный URL действительно доходит до backend'
+for ($i = 0; $i -lt 8; $i++) {
+    try {
+        $publicHealth = Invoke-RestMethod -Uri $publicHealthUrl -TimeoutSec 5
+        if ($publicHealth.ok) { $publicHealthy = $true; break }
+        $publicFailure = 'Сервер вернул ответ без ok=true.'
+    } catch {
+        $publicFailure = $_.Exception.Message
+        if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+            $publicFailure = "HTTP $([int]$_.Exception.Response.StatusCode): $publicFailure"
+        }
+    }
+    Start-Sleep -Seconds 2
+}
+
 try { Set-Clipboard -Value $publicUrl } catch { }
-Write-Step 'Готово — сервер доступен из интернета'
+if ($publicHealthy) {
+    Write-Step 'Публичная проверка прошла'
+} else {
+    Write-Step 'Cloudflare выдал URL, но публичная проверка не прошла'
+    Write-Host "Ошибка проверки: $publicFailure" -ForegroundColor Red
+    Write-Host 'Локальная проверка backend прошла; ниже последние строки журнала cloudflared:' -ForegroundColor Yellow
+    foreach ($logFile in @($stdout, $stderr)) {
+        if (Test-Path $logFile) { Get-Content $logFile -Tail 12 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ } }
+    }
+}
 Write-Host "Публичный адрес: $publicUrl" -ForegroundColor Green
-Write-Host "Проверка:        $publicUrl/api/health"
+Write-Host "Проверка:        $publicHealthUrl"
 Write-Host ''
 Write-Host 'На КАЖДОМ телефоне: Курьерка → Ещё → Сервер сообщества → вставить этот адрес → Сохранить.' -ForegroundColor Yellow
 Write-Host 'Затем войдите или зарегистрируйтесь во вкладке Чаты. Все пользователи должны указать один и тот же адрес.'
